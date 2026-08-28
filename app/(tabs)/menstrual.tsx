@@ -12,6 +12,7 @@ import {
   Alert,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { AmbientBackground } from "@/components/ui/AmbientBackground";
 
 type CycleEntry = {
   id: string;
@@ -207,21 +208,36 @@ export default function MenstrualScreen() {
   };
 
   return (
-    <LinearGradient colors={["#f8bbd0", "#ce93d8"]} style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>🌸 Menstrual Health</Text>
-        <Text style={styles.subtitle}>Track your cycle, symptoms & self-care</Text>
+    <AmbientBackground style={styles.container} accentColor="#FCE4EC">
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.headerContainer}>
+          <Text style={styles.title}>🌸 Menstrual Health</Text>
+          <Text style={styles.subtitle}>
+            Intelligent Cycle Tracking, Symptoms & Phase Guidance
+          </Text>
+        </View>
 
-        {/* Period Tracker */}
+        {/* Period Tracker Card */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Period Tracker</Text>
-          <Text style={styles.cardText}>Log your last period and typical cycle length.</Text>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>Period Tracker</Text>
+            <View style={styles.badgePill}>
+              <Text style={styles.badgePillText}>Cycle Log</Text>
+            </View>
+          </View>
+          <Text style={styles.cardText}>
+            Record your period start date and cycle length to generate insights.
+          </Text>
 
           <Text style={styles.inputLabel}>Last Period Start (YYYY-MM-DD)</Text>
           <TextInput
             value={lastPeriodStart}
             onChangeText={setLastPeriodStart}
             placeholder="2025-01-01"
+            placeholderTextColor="#9c88b0"
             style={styles.input}
           />
 
@@ -231,27 +247,44 @@ export default function MenstrualScreen() {
             onChangeText={setCycleLength}
             keyboardType="number-pad"
             placeholder="28"
+            placeholderTextColor="#9c88b0"
             style={styles.input}
           />
 
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Next Period (estimated): </Text>
+          <View style={styles.infoBanner}>
+            <Text style={styles.infoLabel}>Estimated Next Period:</Text>
             <Text style={styles.infoValue}>{nextPeriodDate ?? "-"}</Text>
           </View>
 
-          <TouchableOpacity style={styles.button} onPress={handleSaveCycle}>
-            <Text style={styles.buttonText}>Save Cycle to History</Text>
+          <TouchableOpacity
+            style={styles.buttonWrapper}
+            activeOpacity={0.85}
+            onPress={handleSaveCycle}
+          >
+            <LinearGradient
+              colors={["#ab47bc", "#8e24aa"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.button}
+            >
+              <Text style={styles.buttonText}>Save Cycle to History</Text>
+            </LinearGradient>
           </TouchableOpacity>
         </View>
 
-        {/* Fertile Window Tracker */}
+        {/* Fertile Window Tracker Card */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Fertile Window Tracker</Text>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>Fertile Window Tracker</Text>
+            <View style={[styles.badgePill, { backgroundColor: "#fce4ec" }]}>
+              <Text style={[styles.badgePillText, { color: "#c2185b" }]}>Ovulation</Text>
+            </View>
+          </View>
           <Text style={styles.cardText}>
-            Based on your last period and cycle length, this estimates ovulation & fertile days.
+            Estimates your fertile window and ovulation day based on your cycle inputs.
           </Text>
           {fertileWindow ? (
-            <>
+            <View style={styles.fertileBox}>
               <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Fertile Window:</Text>
                 <Text style={styles.infoValue}>
@@ -263,20 +296,28 @@ export default function MenstrualScreen() {
                 <Text style={styles.infoValue}>{fertileWindow.ovulation}</Text>
               </View>
               <Text style={styles.smallNote}>
-                This is an estimate, not medical advice. Cycle tracking apps cannot be used as
-                reliable birth control.
+                Note: This is an estimated indicator and should not replace medical guidance.
               </Text>
-            </>
+            </View>
           ) : (
-            <Text style={styles.smallNote}>Enter a valid last period date to see your window.</Text>
+            <Text style={styles.smallNote}>Enter a valid period start date above.</Text>
           )}
         </View>
 
-        {/* Reminders & Notifications */}
+        {/* Health Tips by Cycle Phase Card */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Reminders & Notifications</Text>
+          <Text style={styles.cardTitle}>Current Cycle Phase</Text>
+          <View style={styles.phaseHeaderRow}>
+            <Text style={styles.phaseTitle}>{phaseInfo.phase}</Text>
+          </View>
+          <Text style={styles.phaseTipText}>{phaseInfo.tip}</Text>
+        </View>
+
+        {/* Reminders Card */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Reminders & Alerts</Text>
           <Text style={styles.cardText}>
-            Create reminders for medications, upcoming periods, or self-care.
+            Schedule medication or self-care reminders.
           </Text>
 
           <Text style={styles.inputLabel}>Reminder Title</Text>
@@ -284,19 +325,32 @@ export default function MenstrualScreen() {
             value={reminderTitle}
             onChangeText={setReminderTitle}
             placeholder="Take iron supplement"
+            placeholderTextColor="#9c88b0"
             style={styles.input}
           />
 
-          <Text style={styles.inputLabel}>Date & Time (free text)</Text>
+          <Text style={styles.inputLabel}>Date & Time</Text>
           <TextInput
             value={reminderDateTime}
             onChangeText={setReminderDateTime}
             placeholder="2025-11-20 09:00"
+            placeholderTextColor="#9c88b0"
             style={styles.input}
           />
 
-          <TouchableOpacity style={styles.button} onPress={handleAddReminder}>
-            <Text style={styles.buttonText}>Add Reminder</Text>
+          <TouchableOpacity
+            style={styles.buttonWrapper}
+            activeOpacity={0.85}
+            onPress={handleAddReminder}
+          >
+            <LinearGradient
+              colors={["#ab47bc", "#8e24aa"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.button}
+            >
+              <Text style={styles.buttonText}>Add Reminder</Text>
+            </LinearGradient>
           </TouchableOpacity>
 
           {reminders.length > 0 && (
@@ -312,26 +366,17 @@ export default function MenstrualScreen() {
           )}
         </View>
 
-        {/* Health Tips by Cycle Phase */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Health Tips by Cycle Phase</Text>
-          <View style={styles.infoRow}>
-            <Text style={styles.infoLabel}>Current Phase:</Text>
-            <Text style={styles.infoValue}>{phaseInfo.phase}</Text>
-          </View>
-          <Text style={styles.cardText}>{phaseInfo.tip}</Text>
-        </View>
-
-        {/* Symptom Logging */}
+        {/* Symptom Logging Card */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Symptom Logging</Text>
-          <Text style={styles.cardText}>Log cramps, mood, and anything you’d like to remember.</Text>
+          <Text style={styles.cardText}>Track physical symptoms, mood, and personal notes.</Text>
 
           <Text style={styles.inputLabel}>Date (YYYY-MM-DD)</Text>
           <TextInput
             value={symptomDate}
             onChangeText={setSymptomDate}
             placeholder="2025-11-15"
+            placeholderTextColor="#9c88b0"
             style={styles.input}
           />
 
@@ -340,6 +385,7 @@ export default function MenstrualScreen() {
             value={symptoms}
             onChangeText={setSymptoms}
             placeholder="Cramps, bloating, headache..."
+            placeholderTextColor="#9c88b0"
             style={styles.input}
           />
 
@@ -348,6 +394,7 @@ export default function MenstrualScreen() {
             value={mood}
             onChangeText={setMood}
             placeholder="Anxious, calm, tired..."
+            placeholderTextColor="#9c88b0"
             style={styles.input}
           />
 
@@ -355,18 +402,30 @@ export default function MenstrualScreen() {
           <TextInput
             value={notes}
             onChangeText={setNotes}
-            placeholder="Anything else you want to track"
+            placeholder="Notes..."
+            placeholderTextColor="#9c88b0"
             style={[styles.input, styles.inputMultiline]}
             multiline
           />
 
-          <TouchableOpacity style={styles.button} onPress={handleAddSymptomLog}>
-            <Text style={styles.buttonText}>Save Symptom Log</Text>
+          <TouchableOpacity
+            style={styles.buttonWrapper}
+            activeOpacity={0.85}
+            onPress={handleAddSymptomLog}
+          >
+            <LinearGradient
+              colors={["#ab47bc", "#8e24aa"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.button}
+            >
+              <Text style={styles.buttonText}>Save Symptom Log</Text>
+            </LinearGradient>
           </TouchableOpacity>
 
           {symptomLogs.length > 0 && (
             <View style={styles.sectionList}>
-              <Text style={styles.sectionTitle}>Recent Logs</Text>
+              <Text style={styles.sectionTitle}>Recent Symptom Logs</Text>
               <FlatList
                 data={symptomLogs}
                 keyExtractor={(item) => item.id}
@@ -390,15 +449,15 @@ export default function MenstrualScreen() {
           )}
         </View>
 
-        {/* Cycle History & Reports */}
+        {/* Cycle History & Reports Card */}
         <View style={[styles.card, { marginBottom: 40 }]}>
           <Text style={styles.cardTitle}>Cycle History & Reports</Text>
           <Text style={styles.cardText}>
-            Saved cycles help you understand your patterns over time.
+            Saved cycles help track long-term health trends.
           </Text>
 
           {averageCycleLength && (
-            <View style={styles.infoRow}>
+            <View style={styles.infoBanner}>
               <Text style={styles.infoLabel}>Average Cycle Length:</Text>
               <Text style={styles.infoValue}>{averageCycleLength} days</Text>
             </View>
@@ -420,143 +479,205 @@ export default function MenstrualScreen() {
             </View>
           ) : (
             <Text style={styles.smallNote}>
-              Save cycles from the Period Tracker card to see your history here.
+              Save cycles from the Period Tracker card to build your history log.
             </Text>
           )}
         </View>
       </ScrollView>
-    </LinearGradient>
+    </AmbientBackground>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: "#F8FAFC",
   },
   scrollContent: {
-    padding: 20,
+    paddingHorizontal: 18,
+    paddingTop: Platform.OS === "ios" ? 56 : 40,
     paddingBottom: 40,
+  },
+  headerContainer: {
+    alignItems: "center",
+    marginBottom: 20,
   },
   title: {
     fontSize: 28,
-    fontWeight: "bold",
-    color: "#4a148c",
+    fontWeight: "900",
+    color: "#1C0D2B",
     textAlign: "center",
-    marginBottom: 10,
-    marginTop: 10,
-    paddingTop: 40,
+    letterSpacing: 0.5,
   },
   subtitle: {
-    fontSize: 18,
+    fontSize: 13,
     textAlign: "center",
-    color: "#6a1b9a",
-    marginBottom: 20,
+    color: "#6E5A80",
+    marginTop: 4,
   },
   card: {
-    backgroundColor: "rgba(255, 255, 255, 0.96)",
-    borderRadius: 18,
-    padding: 18,
+    backgroundColor: "#ffffff",
+    borderRadius: 24,
+    padding: 20,
     marginBottom: 18,
-
-    // iOS shadows
-    shadowColor: "#000",
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
+    borderWidth: 1,
+    borderColor: "rgba(142, 36, 170, 0.08)",
+    shadowColor: "#0F031D",
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
     shadowOffset: { width: 0, height: 4 },
-
-    // Android shadow
-    elevation: 6,
-
-    // Web shadow
+    elevation: 3,
     ...(Platform.OS === "web" && {
-      boxShadow: "0px 6px 12px rgba(0,0,0,0.12)",
+      boxShadow: "0px 4px 14px rgba(15, 3, 29, 0.06)",
     }),
+  },
+  cardHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
   },
   cardTitle: {
     fontSize: 20,
-    fontWeight: "bold",
-    marginBottom: 6,
-    color: "#4a148c",
+    fontWeight: "800",
+    color: "#1C0D2B",
+  },
+  badgePill: {
+    backgroundColor: "#f3e8f7",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  badgePillText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#8e24aa",
   },
   cardText: {
-    fontSize: 15,
-    color: "#333",
-    marginBottom: 10,
+    fontSize: 13,
+    color: "#6b5b7b",
+    marginBottom: 14,
+    lineHeight: 18,
   },
   inputLabel: {
     fontSize: 13,
-    color: "#6a1b9a",
+    fontWeight: "700",
+    color: "#4a148c",
     marginTop: 6,
-    marginBottom: 4,
+    marginBottom: 5,
   },
   input: {
-    backgroundColor: "#fdfdfd",
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: Platform.OS === "ios" ? 10 : 8,
+    backgroundColor: "#f7f2fa",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === "ios" ? 12 : 10,
     borderWidth: 1,
-    borderColor: "rgba(74, 20, 140, 0.18)",
+    borderColor: "rgba(142, 36, 170, 0.2)",
     fontSize: 14,
+    color: "#2a0845",
   },
   inputMultiline: {
     minHeight: 70,
     textAlignVertical: "top",
   },
-  button: {
-    backgroundColor: "#8e24aa",
+  buttonWrapper: {
     borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    marginTop: 12,
+    overflow: "hidden",
+    marginTop: 14,
+    elevation: 3,
+  },
+  button: {
+    paddingVertical: 13,
+    paddingHorizontal: 16,
     alignItems: "center",
   },
   buttonText: {
-    color: "#fff",
-    fontWeight: "600",
+    color: "#ffffff",
+    fontWeight: "700",
     fontSize: 15,
+  },
+  infoBanner: {
+    backgroundColor: "#fcf8fd",
+    padding: 12,
+    borderRadius: 14,
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: "rgba(142, 36, 170, 0.15)",
+  },
+  fertileBox: {
+    backgroundColor: "#fff0f5",
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(233, 30, 99, 0.2)",
   },
   infoRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: 8,
+    marginVertical: 3,
     alignItems: "center",
   },
   infoLabel: {
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "700",
     color: "#6a1b9a",
-    marginRight: 4,
+    marginRight: 6,
   },
   infoValue: {
     fontSize: 14,
-    color: "#311b92",
+    fontWeight: "800",
+    color: "#8e24aa",
+  },
+  phaseHeaderRow: {
+    backgroundColor: "#f3e8f7",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    alignSelf: "flex-start",
+    marginBottom: 10,
+    marginTop: 4,
+  },
+  phaseTitle: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#8e24aa",
+  },
+  phaseTipText: {
+    fontSize: 14,
+    color: "#2a0845",
+    lineHeight: 21,
   },
   smallNote: {
-    fontSize: 12,
-    color: "#555",
+    fontSize: 11,
+    color: "#7b688b",
     marginTop: 8,
+    fontStyle: "italic",
   },
   sectionList: {
-    marginTop: 10,
+    marginTop: 14,
   },
   sectionTitle: {
-    fontSize: 15,
-    fontWeight: "600",
-    marginBottom: 6,
-    color: "#5e35b1",
+    fontSize: 14,
+    fontWeight: "800",
+    marginBottom: 8,
+    color: "#4a148c",
   },
   listItem: {
-    paddingVertical: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "rgba(0,0,0,0.08)",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(142, 36, 170, 0.1)",
   },
   listItemTitle: {
     fontSize: 14,
-    fontWeight: "600",
-    color: "#4a148c",
+    fontWeight: "700",
+    color: "#2a0845",
   },
   listItemSubtitle: {
-    fontSize: 13,
-    color: "#444",
+    fontSize: 12,
+    color: "#6b5b7b",
+    marginTop: 2,
   },
 });
+  

@@ -37,3 +37,23 @@ yarn-error.*
 *.tsbuildinfo
 
 app-example
+
+# Project environment files
+WomenSafetyApp/.env
+WomenSafetyApp/server/.env
+
+# Server logs
+WomenSafetyApp/server/logs/
+*.log
+
+# Server dependencies
+WomenSafetyApp/server/node_modules/
+
+# Environment variables
+.env
+server/.env
+
+# Server logs
+server/logs/
+*.logn# Server build outputnserver/dist/
+n# Server environmentnserver/.env

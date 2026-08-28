@@ -1,14 +1,50 @@
 // app/(tabs)/_layout.tsx
-import { Tabs } from "expo-router";
+import React, { useEffect } from "react";
+import { Tabs, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AuthService } from "@/services/AuthService";
 
 export default function TabsLayout() {
+  const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkAuth = async () => {
+      const loggedIn = await AuthService.isLoggedIn();
+      if (!loggedIn && isMounted) {
+        router.replace("/login");
+      }
+    };
+    checkAuth();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#e91e63",
-        tabBarInactiveTintColor: "#777",
+        tabBarActiveTintColor: "#8e24aa",
+        tabBarInactiveTintColor: "#a090b0",
+        tabBarStyle: {
+          backgroundColor: "#ffffff",
+          borderTopWidth: 1,
+          borderTopColor: "rgba(142, 36, 170, 0.08)",
+          height: 62 + insets.bottom,
+          paddingBottom: 8 + insets.bottom,
+          paddingTop: 6,
+          elevation: 4,
+          shadowColor: "#0F031D",
+          shadowOpacity: 0.04,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: -3 },
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: "700",
+        },
       }}
     >
       <Tabs.Screen
@@ -47,6 +83,16 @@ export default function TabsLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="assistant"
+        options={{
+          title: "Assistant",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="chatbubbles" color={color} size={size} />
+          ),
+        }}
+      />
     </Tabs>
   );
 }
+
