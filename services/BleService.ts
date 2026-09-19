@@ -191,7 +191,7 @@ class BleService {
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       }
-    } catch {
+    } catch (err) {
       console.warn('[BLE] Error requesting Android permissions:', err);
       return false;
     }
@@ -407,7 +407,7 @@ class BleService {
           this.handleIncomingMessage(decodedText);
         }
       });
-    } catch {
+    } catch (e) {
       console.error(`[BLE] Failed to register monitor for ${characteristic?.uuid}:`, e);
     }
   }
@@ -605,7 +605,7 @@ class BleService {
     this.eventListeners.forEach((listener) => {
       try {
         listener(event);
-      } catch {
+      } catch (err) {
         console.error('[BLE] Listener error:', err);
       }
     });
