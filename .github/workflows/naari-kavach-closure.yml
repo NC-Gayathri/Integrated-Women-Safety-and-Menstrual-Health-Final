@@ -11,6 +11,8 @@ on:
       - "esp32-firmware/naari_kavach_dual_sensor_ble_test/**"
       - "services/BleService.ts"
       - "app/(tabs)/safety.tsx"
+      - "android/**"
+      - "tsconfig.naari-ci.json"
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
       - ".github/workflows/naari-kavach-closure.yml"
   workflow_dispatch:
@@ -85,9 +87,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p build/naari-kavach
           arduino-cli compile \
             --fqbn esp32:esp32:esp32doit-devkit-v1 \
+            --output-dir build/naari-kavach \
             esp32-firmware/naari_kavach_dual_sensor_ble_test
+
+      - name: Preserve flashable firmware binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: naari-kavach-esp32-firmware
+          path: build/naari-kavach/*
+          if-no-files-found: error
 
   app-static:
     name: App TypeScript and lint
@@ -97,7 +108,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
 
       - name: Install dependencies
@@ -108,3 +119,37 @@ jobs:
 
       - name: TypeScript check
         run: npx tsc --noEmit -p tsconfig.naari-ci.json
+
+  android-native:
+    name: Android native BLE build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Android debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x android/gradlew
+          cd android
+          ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Preserve Android debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: naari-kavach-android-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
