@@ -25,8 +25,8 @@ async function startServer() {
 
     console.log('STEP 3: before app.listen');
 
-    const server = app.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode.`);
+    const server = app.listen(PORT, '0.0.0.0', () => {
+      logger.info(`Server running on port ${PORT} (0.0.0.0) in ${process.env.NODE_ENV || 'development'} mode.`);
       logger.info(`Interactive Swagger Documentation: http://localhost:${PORT}/api/docs`);
       logger.info(`Health check: http://localhost:${PORT}/health`);
     });

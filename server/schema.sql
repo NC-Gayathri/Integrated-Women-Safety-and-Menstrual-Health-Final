@@ -195,13 +195,57 @@ CREATE TABLE IF NOT EXISTS `wellness_challenges` (
 -- ---------------------------------------------------
 CREATE TABLE IF NOT EXISTS `iot_devices` (
   `id` INT AUTO_INCREMENT PRIMARY KEY,
-  `user_id` INT NOT NULL,
-  `device_name` VARCHAR(100) NOT NULL,
-  `device_identifier` VARCHAR(150) NOT NULL UNIQUE,
+  `user_id` INT NULL DEFAULT NULL,
+  `device_name` VARCHAR(100) NOT NULL DEFAULT 'NAARI_KAVACH',
+  `device_id` VARCHAR(150) NOT NULL UNIQUE,
+  `api_key_hash` VARCHAR(255) NULL DEFAULT NULL,
   `battery_level` INT DEFAULT 100,
   `status` VARCHAR(50) DEFAULT 'ACTIVE',
+  `last_heart_rate` INT NULL DEFAULT NULL,
+  `last_fall_detected` BOOLEAN DEFAULT FALSE,
   `last_seen` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
   INDEX `idx_iot_user_id` (`user_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------
+-- 12. IoT Events Table
+-- ---------------------------------------------------
+CREATE TABLE IF NOT EXISTS `iot_events` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `event_id` VARCHAR(150) NOT NULL UNIQUE,
+  `device_id` VARCHAR(100) NOT NULL,
+  `user_id` INT NOT NULL,
+  `event_type` VARCHAR(50) NOT NULL,
+  `heart_rate` INT NULL DEFAULT NULL,
+  `fall_detected` BOOLEAN DEFAULT FALSE,
+  `battery_level` INT NULL DEFAULT NULL,
+  `is_emergency` BOOLEAN DEFAULT FALSE,
+  `status` VARCHAR(50) NOT NULL DEFAULT 'TRIGGERED',
+  `raw_payload` TEXT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_iot_events_user` (`user_id`),
+  INDEX `idx_iot_events_device` (`device_id`),
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ---------------------------------------------------
+-- 13. Fitness Logs Table (FitMind)
+-- ---------------------------------------------------
+CREATE TABLE IF NOT EXISTS `fitness_logs` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` INT NOT NULL,
+  `date` DATE NOT NULL,
+  `steps` INT NOT NULL DEFAULT 0,
+  `water_glasses` INT NOT NULL DEFAULT 0,
+  `heart_rate` INT NULL DEFAULT NULL,
+  `workout_completed` BOOLEAN NOT NULL DEFAULT FALSE,
+  `journal` TEXT NULL DEFAULT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `idx_fitness_user_date` (`user_id`, `date`),
+  INDEX `idx_fitness_user` (`user_id`),
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

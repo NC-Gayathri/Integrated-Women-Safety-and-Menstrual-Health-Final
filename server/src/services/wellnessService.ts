@@ -29,4 +29,16 @@ export class WellnessService {
     }
     return { id, status };
   }
+
+  static async deleteChallenge(userId: number, id: number) {
+    const [result]: any = await pool.query(
+      'UPDATE wellness_challenges SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+      [id, userId]
+    );
+
+    if (result.affectedRows === 0) {
+      throw { statusCode: 404, message: 'Wellness challenge not found.' };
+    }
+    return true;
+  }
 }

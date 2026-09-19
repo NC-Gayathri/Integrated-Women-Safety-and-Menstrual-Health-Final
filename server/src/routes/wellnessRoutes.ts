@@ -105,6 +105,7 @@ router.post('/', wellnessValidator, validateRequest, WellnessController.createCh
  *         description: Challenge not found.
  */
 router.put('/:id', wellnessIdParamValidator, validateRequest, WellnessController.updateChallenge);
+router.delete('/:id', wellnessIdParamValidator, validateRequest, WellnessController.deleteChallenge);
 
 export default router;
 

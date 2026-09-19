@@ -1,6 +1,6 @@
 import { LinearGradient } from "expo-linear-gradient";
 import * as Notifications from "expo-notifications";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import {
   Alert,
   Dimensions,
@@ -20,6 +20,8 @@ import Animated, {
   withRepeat,
   withTiming,
 } from "react-native-reanimated";
+import { useFocusEffect } from "@react-navigation/native";
+import { ApiService } from "@/services/ApiService";
 
 const screenWidth = Dimensions.get("window").width;
 
@@ -35,12 +37,93 @@ Notifications.setNotificationHandler({
 
 /* ---------------- APP ---------------- */
 export default function FitMindScreen() {
-  const [steps] = useState<number[]>([4000, 6000, 8000, 5000, 9000, 7500, 11000]);
-  const [todaySteps] = useState<number>(8500);
+  const [steps, setSteps] = useState<number[]>([4000, 6000, 8000, 5000, 9000, 7500, 11000]);
+  const [todaySteps, setTodaySteps] = useState<number>(8500);
   const [water, setWater] = useState<number>(4);
-  const [heart] = useState<number>(76);
+  const [heart, setHeart] = useState<number>(76);
   const [journal, setJournal] = useState<string>("");
   const [workoutDone, setWorkoutDone] = useState<boolean>(false);
+  const [savingJournal, setSavingJournal] = useState<boolean>(false);
+
+  const loadFitnessData = useCallback(async () => {
+    try {
+      const todayRes = await ApiService.fitness.getToday();
+      const todayData = todayRes?.data || todayRes;
+      if (todayData && todayData.id) {
+        if (typeof todayData.steps === "number") setTodaySteps(todayData.steps);
+        if (typeof todayData.water_glasses === "number") setWater(todayData.water_glasses);
+        if (typeof todayData.heart_rate === "number") setHeart(todayData.heart_rate);
+        if (typeof todayData.workout_completed !== "undefined") setWorkoutDone(Boolean(todayData.workout_completed));
+        if (typeof todayData.journal === "string") setJournal(todayData.journal);
+      }
+
+      const weekRes = await ApiService.fitness.getWeekTrend();
+      const weekLogs = weekRes?.data || (Array.isArray(weekRes) ? weekRes : []);
+      if (Array.isArray(weekLogs) && weekLogs.length > 0) {
+        const last7Steps = weekLogs.slice(-7).map((l: any) => l.steps || 0);
+        while (last7Steps.length < 7) {
+          last7Steps.unshift(5000);
+        }
+        setSteps(last7Steps);
+      }
+    } catch (e) {
+      console.log("Error loading fitness data from backend:", e);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadFitnessData();
+    }, [loadFitnessData])
+  );
+
+  const handleWaterChange = async (delta: number) => {
+    const next = Math.max(0, water + delta);
+    setWater(next);
+    try {
+      await ApiService.fitness.saveDailyLog({
+        water_glasses: next,
+        steps: todaySteps,
+        workout_completed: workoutDone,
+        journal,
+      });
+    } catch (e) {
+      console.warn("Failed to persist water update to MySQL:", e);
+    }
+  };
+
+  const handleToggleWorkout = async () => {
+    const next = !workoutDone;
+    setWorkoutDone(next);
+    try {
+      await ApiService.fitness.saveDailyLog({
+        workout_completed: next,
+        water_glasses: water,
+        steps: todaySteps,
+        journal,
+      });
+    } catch (e) {
+      console.warn("Failed to persist workout update to MySQL:", e);
+    }
+  };
+
+  const handleSaveJournal = async () => {
+    setSavingJournal(true);
+    try {
+      await ApiService.fitness.saveDailyLog({
+        journal,
+        steps: todaySteps,
+        water_glasses: water,
+        workout_completed: workoutDone,
+      });
+      Alert.alert("Journal Saved", "Your reflection has been safely stored.");
+    } catch (e) {
+      console.error("Failed to save journal to MySQL:", e);
+      Alert.alert("Error", "Could not save journal entry to server.");
+    } finally {
+      setSavingJournal(false);
+    }
+  };
 
   const calories = (todaySteps * 0.04).toFixed(0);
   const distance = (todaySteps * 0.0008).toFixed(2);
@@ -135,8 +218,8 @@ export default function FitMindScreen() {
         <Section title="💧 Hydration Tracker">
           <Text style={styles.big}>{water} Glasses</Text>
           <Row>
-            <Btn text="+1 Glass" onPress={() => setWater(water + 1)} />
-            <Btn text="-1 Glass" onPress={() => setWater(Math.max(0, water - 1))} />
+            <Btn text="+1 Glass" onPress={() => handleWaterChange(1)} />
+            <Btn text="-1 Glass" onPress={() => handleWaterChange(-1)} />
           </Row>
         </Section>
 
@@ -145,7 +228,7 @@ export default function FitMindScreen() {
           <TouchableOpacity
             style={styles.workoutStatusCard}
             activeOpacity={0.8}
-            onPress={() => setWorkoutDone(!workoutDone)}
+            onPress={handleToggleWorkout}
           >
             <Text style={styles.workoutStatusText}>
               {workoutDone ? "✅ Workout Completed!" : "⬜ Mark Workout Done"}
@@ -163,8 +246,27 @@ export default function FitMindScreen() {
             style={styles.input}
             value={journal}
             onChangeText={setJournal}
+            onBlur={() => {
+              if (journal.trim()) {
+                ApiService.fitness.saveDailyLog({
+                  journal,
+                  steps: todaySteps,
+                  water_glasses: water,
+                  workout_completed: workoutDone,
+                }).catch(() => {});
+              }
+            }}
             multiline
           />
+          <TouchableOpacity
+            style={[styles.btn, { marginTop: 10 }]}
+            activeOpacity={0.85}
+            onPress={handleSaveJournal}
+          >
+            <Text style={{ color: "#ffffff", fontWeight: "700", textAlign: "center" }}>
+              {savingJournal ? "Saving..." : "💾 Save Journal Entry"}
+            </Text>
+          </TouchableOpacity>
         </Section>
 
         {/* LINE CHART */}

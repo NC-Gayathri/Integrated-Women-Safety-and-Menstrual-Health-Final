@@ -3,14 +3,36 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
-const DEV_HOST_IP = '10.197.106.127';
+const DEV_HOST_IP = '10.43.176.127';
 const DEV_PORT = '5000';
 
-// Base API URL from environment or platform-based default
-const getDefaultBaseUrl = () => {
-  // 1. Explicit environment variable override takes highest priority
-  if (process.env.EXPO_PUBLIC_API_URL) {
-    return process.env.EXPO_PUBLIC_API_URL;
+/**
+ * Normalizes an API URL to ensure standard trailing /api/v1 path.
+ */
+const normalizeApiUrl = (url: string): string => {
+  let clean = url.trim().replace(/\/+$/, '');
+  if (!clean.endsWith('/api/v1')) {
+    if (clean.endsWith('/api')) {
+      clean = `${clean}/v1`;
+    } else {
+      clean = `${clean}/api/v1`;
+    }
+  }
+  return clean;
+};
+
+/**
+ * Dynamically resolves the Base API URL.
+ * Priority order:
+ * 1. process.env.EXPO_PUBLIC_API_URL (if provided and valid)
+ * 2. Web development loopback (http://localhost:5000/api/v1)
+ * 3. Metro Host URI (extracted from Expo Constants hostUri / debuggerHost)
+ * 4. Configured DEV_HOST_IP fallback (10.43.176.127:5000/api/v1)
+ */
+export const getDefaultBaseUrl = (): string => {
+  // 1. Explicit environment variable override
+  if (process.env.EXPO_PUBLIC_API_URL && process.env.EXPO_PUBLIC_API_URL.trim().length > 0) {
+    return normalizeApiUrl(process.env.EXPO_PUBLIC_API_URL);
   }
 
   // 2. Web development
@@ -18,43 +40,54 @@ const getDefaultBaseUrl = () => {
     return `http://localhost:${DEV_PORT}/api/v1`;
   }
 
-  // 3. Android platform (Physical device & Emulator)
-  if (Platform.OS === 'android') {
-    const hostUri = Constants.expoConfig?.hostUri || (Constants as any).manifest?.debuggerHost;
-    const debuggerHost = hostUri ? hostUri.split(':')[0] : null;
+  // 3. Extract active Metro bundler host if available
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    (Constants as any).manifest?.debuggerHost ||
+    (Constants as any).manifest2?.extra?.expoClient?.hostUri ||
+    (Constants as any).experienceUrl;
 
-    if (debuggerHost === 'localhost' || debuggerHost === '127.0.0.1') {
-      // Android Emulator host loopback
-      return `http://10.0.2.2:${DEV_PORT}/api/v1`;
+  if (typeof hostUri === 'string' && hostUri.includes(':')) {
+    const rawHost = hostUri.split(':')[0].replace(/^[a-zA-Z]+:\/\//, '');
+    if (rawHost && rawHost !== 'localhost' && rawHost !== '127.0.0.1') {
+      return `http://${rawHost}:${DEV_PORT}/api/v1`;
     }
-
-    if (debuggerHost) {
-      return `http://${debuggerHost}:${DEV_PORT}/api/v1`;
-    }
-
-    // Physical Android device fallback
-    return `http://${DEV_HOST_IP}:${DEV_PORT}/api/v1`;
   }
 
-  // 4. Fallback for iOS physical devices or other environments
+  // 4. Android Emulator loopback check
+  if (Platform.OS === 'android') {
+    const debuggerHost = (Constants as any).manifest?.debuggerHost;
+    if (debuggerHost === 'localhost' || debuggerHost === '127.0.0.1') {
+      return `http://10.0.2.2:${DEV_PORT}/api/v1`;
+    }
+  }
+
+  // 5. Default physical LAN fallback
   return `http://${DEV_HOST_IP}:${DEV_PORT}/api/v1`;
 };
 
-const API_BASE_URL = getDefaultBaseUrl();
+export const API_BASE_URL = getDefaultBaseUrl();
 export const TOKEN_KEY = '@auth_jwt_token';
+
+console.log(`[ApiService] Initialized with API_BASE_URL: ${API_BASE_URL}`);
 
 // Create Axios Instance
 export const apiClient: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 15000, // 15 seconds global timeout
+  timeout: 15000, // 15s timeout
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Request Interceptor: Inject JWT Token automatically
+// Request Interceptor: Inject JWT Token automatically + Debug Log
 apiClient.interceptors.request.use(
   async (config: InternalAxiosRequestConfig) => {
+    const base = (config.baseURL || '').replace(/\/+$/, '');
+    const path = (config.url || '').replace(/^\/+/, '');
+    const fullUrl = `${base}/${path}`;
+    console.log(`[API Request] ${config.method?.toUpperCase()} ${fullUrl}`);
+
     try {
       const token = await AsyncStorage.getItem(TOKEN_KEY);
       if (token && config.headers) {
@@ -65,33 +98,88 @@ apiClient.interceptors.request.use(
     }
     return config;
   },
-  (error: AxiosError) => Promise.reject(error)
+  (error: AxiosError) => {
+    console.error('[API Request Config Error]', error);
+    return Promise.reject(error);
+  }
 );
 
-// Response Interceptor: Handle Token Expiration & Transient Retries
+// Response Interceptor: Diagnostic Error Classification & Logging
 apiClient.interceptors.response.use(
-  (response: any) => response,
+  (response: any) => {
+    console.log(`[API Response] ${response.status} ${response.config?.url}`);
+    return response;
+  },
   async (error: AxiosError) => {
     const originalRequest: any = error.config;
+    const fullUrl = originalRequest
+      ? `${(originalRequest.baseURL || '').replace(/\/+$/, '')}/${(originalRequest.url || '').replace(/^\/+/, '')}`
+      : 'unknown';
 
-    // Handle 401 Unauthorized / Token Expiration
-    if (error.response?.status === 401) {
-      console.warn('Authentication token expired or invalid. Clearing session...');
-      await AsyncStorage.removeItem(TOKEN_KEY);
-      await AsyncStorage.removeItem('currentUserName');
-      await AsyncStorage.removeItem('currentUserEmail');
+    if (!error.response) {
+      // Differentiate Network vs Timeout vs Host Unreachable
+      if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+        console.warn(`[API Timeout] Request timed out after 15s on ${originalRequest?.method?.toUpperCase()} ${fullUrl}`);
+        console.warn(`Troubleshooting: Verify the backend at ${API_BASE_URL} is running and not hung.`);
+      } else {
+        console.warn(`[API Network Error] Could not reach backend on ${originalRequest?.method?.toUpperCase()} ${fullUrl}`);
+        console.warn(`Troubleshooting Checklist:`);
+        console.warn(`  1. Is the Express server running on port ${DEV_PORT}? ('npm run dev' in server/)`);
+        console.warn(`  2. Are your phone and laptop connected to the SAME Wi-Fi network?`);
+        console.warn(`  3. Is the configured API URL (${API_BASE_URL}) your laptop's current Wi-Fi IP?`);
+        console.warn(`  4. Is Windows Firewall blocking port ${DEV_PORT}?`);
+      }
+    } else {
+      console.warn(
+        `[API Error ${error.response.status}] ${originalRequest?.method?.toUpperCase()} ${fullUrl}:`,
+        error.response.data || error.message
+      );
+
+      // Handle 401 Unauthorized / Token Expiration
+      if (error.response.status === 401) {
+        console.warn('Authentication token expired or invalid. Clearing local session...');
+        await AsyncStorage.removeItem(TOKEN_KEY);
+        await AsyncStorage.removeItem('currentUserName');
+        await AsyncStorage.removeItem('currentUserEmail');
+      }
     }
 
-    // Automatic single retry for transient network failure
+    // Single automatic retry for transient network failure (once)
     if (!error.response && originalRequest && !originalRequest._retry) {
       originalRequest._retry = true;
-      console.warn('Transient network failure, retrying API request...');
+      console.warn('Transient network failure, retrying API request once...');
       return apiClient(originalRequest);
     }
 
     return Promise.reject(error);
   }
 );
+
+/**
+ * Startup Backend Health Check Diagnostics.
+ * Pings the Express /health endpoint and logs reachability status.
+ */
+export const checkBackendHealth = async (): Promise<{ isReachable: boolean; status?: number; data?: any; error?: string }> => {
+  const origin = API_BASE_URL.replace(/\/api\/v1\/?$/, '');
+  const healthUrl = `${origin}/health`;
+
+  console.log(`[ApiService] Running backend health diagnostic: GET ${healthUrl}`);
+  try {
+    const response = await axios.get(healthUrl, { timeout: 5000 });
+    console.log(`[ApiService Diagnostic] Backend Health Check PASSED (HTTP ${response.status}):`, response.data);
+    return { isReachable: true, status: response.status, data: response.data };
+  } catch (err: any) {
+    console.warn(`[ApiService Diagnostic] Backend Health Check FAILED at ${healthUrl}:`, err.message);
+    return { isReachable: false, error: err.message };
+  }
+};
+
+// Run health diagnostic automatically on load in development
+if (__DEV__) {
+  setTimeout(() => {
+    checkBackendHealth().catch(() => {});
+  }, 1000);
+}
 
 // Helper for saving/clearing JWT token
 export const setAuthToken = async (token: string | null): Promise<void> => {
@@ -108,6 +196,8 @@ export const getAuthToken = async (): Promise<string | null> => {
 
 // Reusable API Service Methods
 export const ApiService = {
+  checkBackendHealth,
+
   // Authentication APIs
   auth: {
     register: async (payload: { name: string; email: string; password: string; phone?: string }) => {
@@ -149,7 +239,6 @@ export const ApiService = {
       }
       return res.data;
     },
-
 
     logout: async () => {
       try {
@@ -322,6 +411,64 @@ export const ApiService = {
 
     updateChallenge: async (id: number, status: string) => {
       const res = await apiClient.put(`/wellness/${id}`, { status });
+      return res.data;
+    },
+
+    deleteChallenge: async (id: number) => {
+      const res = await apiClient.delete(`/wellness/${id}`);
+      return res.data;
+    },
+  },
+
+  // Fitness APIs (FitMind)
+  fitness: {
+    getToday: async () => {
+      const res = await apiClient.get('/fitness/today');
+      return res.data;
+    },
+
+    getWeekTrend: async () => {
+      const res = await apiClient.get('/fitness/week');
+      return res.data;
+    },
+
+    saveDailyLog: async (payload: {
+      date?: string;
+      steps?: number;
+      water_glasses?: number;
+      heart_rate?: number;
+      workout_completed?: boolean;
+      journal?: string;
+    }) => {
+      const res = await apiClient.post('/fitness/log', payload);
+      return res.data;
+    },
+  },
+
+  // IoT Wearable APIs
+  iot: {
+    getDeviceStatus: async () => {
+      const res = await apiClient.get('/iot/devices/status');
+      return res.data;
+    },
+
+    pollEmergencies: async () => {
+      const res = await apiClient.get('/iot/events/emergency-poll');
+      return res.data;
+    },
+
+    acknowledgeEvent: async (eventId: number | string) => {
+      const res = await apiClient.post(`/iot/events/${eventId}/ack`);
+      return res.data;
+    },
+
+    pairDevice: async (payload: { deviceId: string; deviceName?: string; deviceApiKey?: string }) => {
+      const res = await apiClient.post('/iot/devices/pair', payload);
+      return res.data;
+    },
+
+    unpairDevice: async (deviceId: string) => {
+      const res = await apiClient.delete(`/iot/devices/${deviceId}`);
       return res.data;
     },
   },

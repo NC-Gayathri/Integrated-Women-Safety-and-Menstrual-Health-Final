@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -12,6 +12,8 @@ import {
   FlatList,
   ActivityIndicator,
   Platform,
+  AppState,
+  AppStateStatus,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -20,29 +22,123 @@ import { Accelerometer } from "expo-sensors";
 import * as Location from "expo-location";
 import * as Linking from "expo-linking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
+import { useFocusEffect } from "@react-navigation/native";
+import { IoTStatusCard } from "@/components/IoTStatusCard";
+import { IoTService, IoTDeviceStatus } from "@/services/IoTService";
+import { bleService, BleTelemetryEvent, BleDetailedState } from "@/services/BleService";
+import { ApiService } from "@/services/ApiService";
+
+export interface EmergencyContactRecord {
+  id?: number;
+  name: string;
+  phone: string;
+  relationship?: string;
+  is_primary?: boolean;
+}
 
 export default function SafetyScreen() {
   const [safetyOn, setSafetyOn] = useState(false);
-  const [heartRateValue, setHeartRateValue] = useState<number | null>(null);
   const [fallDetected, setFallDetected] = useState(false);
   const [alertTriggered, setAlertTriggered] = useState(false);
   const [shakeCount, setShakeCount] = useState(0);
-
-  const [permission, requestPermission] = useCameraPermissions();
-  const cameraRef = useRef(null);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [measuring, setMeasuring] = useState(false);
+  const [iotStatus, setIotStatus] = useState<IoTDeviceStatus | null>(null);
+  const [liveBpm, setLiveBpm] = useState<number | null>(null);
+  const [bleState, setBleState] = useState<BleDetailedState>('DISCONNECTED');
   const [error, setError] = useState<string | null>(null);
 
-  const [contacts, setContacts] = useState<string[]>([]);
+  const [contacts, setContacts] = useState<EmergencyContactRecord[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [newContact, setNewContact] = useState("");
+  const [newContactName, setNewContactName] = useState("");
 
   const accelSubscription = useRef<any>(null);
   const sosCooldownRef = useRef(false);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fetch real IoT device telemetry (heart rate, online status) from backend
+  const fetchIotTelemetry = useCallback(async () => {
+    try {
+      const data = await IoTService.getDeviceStatus();
+      setIotStatus(data);
+      const hr = data?.device?.lastHeartRate;
+      if (typeof hr === 'number') {
+        setLiveBpm((prev) => (prev !== null ? prev : hr));
+      }
+    } catch (e) {
+      // Ignore background fetch error
+    }
+  }, []);
+
+  // Connect & listen to direct ESP32 Bluetooth Low Energy events
+  useEffect(() => {
+    // Start BLE scan & connect on screen mount
+    bleService.startScanAndConnect();
+
+    const unsubStatus = bleService.addStatusListener((st) => {
+      setBleState(st);
+    });
+
+    const unsubEvents = bleService.addEventListener((event: BleTelemetryEvent) => {
+      console.log(`[SafetyScreen] Handling BLE Event: ${event.type}`, event);
+
+      if (event.type === 'STATUS_ONLINE') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else if (event.type === 'HEARTBEAT' && typeof event.bpm === 'number') {
+        setLiveBpm(event.bpm);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } else if (event.type === 'FALL_DETECTED') {
+        setFallDetected(true);
+        setAlertTriggered(true);
+        Alert.alert("⚠ Hardware Fall Detected!", "ESP32 wearable detected a physical fall event!");
+        triggerSOS();
+      } else if (event.type === 'BUTTON_SOS') {
+        Alert.alert("🚨 Physical SOS Triggered!", "ESP32 hardware emergency button was pressed!");
+        triggerSOS();
+      }
+    });
+
+    return () => {
+      unsubStatus();
+      unsubEvents();
+    };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let timer: ReturnType<typeof setInterval> | null = null;
+
+      const start = () => {
+        if (timer) clearInterval(timer);
+        fetchIotTelemetry();
+        timer = setInterval(fetchIotTelemetry, 10000); // 10s live telemetry refresh
+      };
+
+      const stop = () => {
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      };
+
+      const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+        if (nextAppState === 'active') {
+          start();
+        } else {
+          stop();
+        }
+      });
+
+      if (AppState.currentState === 'active') {
+        start();
+      }
+
+      return () => {
+        stop();
+        subscription.remove();
+      };
+    }, [fetchIotTelemetry])
+  );
 
   useEffect(() => {
     loadContacts();
@@ -50,15 +146,12 @@ export default function SafetyScreen() {
 
   useEffect(() => {
     if (safetyOn) {
-      startHeartbeatMonitoring();
       startSensors(); // shake + fall in one listener
     } else {
-      stopHeartbeatMonitoring();
       stopSensors();
     }
 
     return () => {
-      stopHeartbeatMonitoring();
       stopSensors();
     };
   }, [safetyOn]);
@@ -125,67 +218,125 @@ export default function SafetyScreen() {
     setShakeCount(0);
   };
 
-  // --------------- Heartbeat (simulated using camera + timer) ---------------
-  const startHeartbeatMonitoring = async () => {
-    if (cameraActive || measuring) return;
-    setError(null);
+  // --------------- Real ESP32 MAX30102 Heartbeat Sensor ---------------
+  const checkHeartbeatSensor = async () => {
+    await fetchIotTelemetry();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    if (!permission?.granted) {
-      const result = await requestPermission();
-      if (!result.granted) {
-        setError("Camera permission is required for heartbeat monitoring.");
-        return;
-      }
+    const effectiveBpm = liveBpm || bleService.latestBpm || iotStatus?.device?.lastHeartRate;
+
+    if (typeof effectiveBpm === "number" && effectiveBpm > 0) {
+      Alert.alert(
+        "💓 Live Pulse Reading",
+        `Real-time heart rate from ESP32 MAX30102 sensor: ${effectiveBpm} BPM`
+      );
+      return;
     }
 
-    setCameraActive(true);
-    setMeasuring(true);
-    setHeartRateValue(null);
-    Alert.alert("Heartbeat Check", "Place your fingertip gently on the camera lens ❤");
+    if (bleState === 'ESP32 ONLINE' || bleState === 'RECEIVING SENSOR DATA' || bleState === 'SUBSCRIBED TO SENSOR NOTIFICATIONS') {
+      Alert.alert(
+        "Waiting for Sensor Reading",
+        "ESP32 is ONLINE and subscribed to notifications. Place your finger gently on the MAX30102 pulse sensor."
+      );
+      return;
+    }
 
-    // Simulate reading after 3 seconds
-    setTimeout(() => {
-      const simulated = 72 + Math.floor(Math.random() * 10);
-      setHeartRateValue(simulated);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setMeasuring(false);
-      setCameraActive(false);
-    }, 3000);
+    if (bleState === 'CONNECTED - WAITING FOR ESP32 DATA') {
+      Alert.alert(
+        "Waiting for ESP32 Data",
+        "Connected to ESP32. Waiting for 'STATUS:ONLINE' or sensor telemetry..."
+      );
+      return;
+    }
+
+    if (bleState === 'SCANNING FOR ESP32' || bleState === 'CONNECTING' || bleState === 'ESP32 FOUND') {
+      Alert.alert(
+        "Connecting to Wearable",
+        `Current Status: ${bleState}...`
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Sensor Not Connected",
+      "ESP32 wearable is not connected. Ensure the device is powered ON and within Bluetooth range."
+    );
   };
 
-  const stopHeartbeatMonitoring = () => {
-    setCameraActive(false);
-    setMeasuring(false);
-    setHeartRateValue(null);
-  };
-
-  // --------------- AsyncStorage: Emergency Contacts ---------------
+  // --------------- Emergency Contacts: Backend MySQL + Offline Cache ---------------
   const loadContacts = async () => {
     try {
-      const saved = await AsyncStorage.getItem("emergencyContacts");
-      if (saved) setContacts(JSON.parse(saved));
+      const res = await ApiService.emergency.getContacts();
+      const backendContacts = res?.data || (Array.isArray(res) ? res : []);
+      if (Array.isArray(backendContacts) && backendContacts.length > 0) {
+        setContacts(backendContacts);
+        await AsyncStorage.setItem("emergencyContacts", JSON.stringify(backendContacts));
+        return;
+      }
     } catch (e) {
-      console.log("Error loading contacts", e);
+      console.log("Error loading contacts from API, falling back to cache:", e);
+    }
+
+    // Fallback to cache if offline or network failure
+    try {
+      const saved = await AsyncStorage.getItem("emergencyContacts");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const normalized: EmergencyContactRecord[] = parsed.map((item: any) =>
+          typeof item === "string" ? { name: "Emergency Contact", phone: item } : item
+        );
+        setContacts(normalized);
+      }
+    } catch (e) {
+      console.log("Error loading contacts cache", e);
     }
   };
 
   const addEmergencyContact = async () => {
-    if (!newContact.trim()) return;
-    const updated = [...contacts, newContact.trim()];
-    setContacts(updated);
-    await AsyncStorage.setItem("emergencyContacts", JSON.stringify(updated));
-    setNewContact("");
-    setModalVisible(false);
+    if (!newContact.trim()) {
+      Alert.alert("Phone Required", "Please enter a valid phone number.");
+      return;
+    }
+    const phone = newContact.trim();
+    const name = newContactName.trim() || "Emergency Contact";
+
+    try {
+      const res = await ApiService.emergency.addContact({
+        name,
+        phone,
+        is_primary: contacts.length === 0,
+      });
+
+      const savedContact: EmergencyContactRecord = res?.data || { name, phone };
+      const updated = [...contacts, savedContact];
+      setContacts(updated);
+      await AsyncStorage.setItem("emergencyContacts", JSON.stringify(updated));
+      setNewContact("");
+      setNewContactName("");
+      setModalVisible(false);
+      Alert.alert("Saved", "Emergency contact saved to database.");
+    } catch (err: any) {
+      console.error("Failed to add emergency contact:", err);
+      Alert.alert("Database Error", err.response?.data?.message || "Failed to save contact to database.");
+    }
   };
 
-  const deleteContact = async (index: number) => {
-    const updated = contacts.filter((_, i) => i !== index);
-    setContacts(updated);
-    await AsyncStorage.setItem("emergencyContacts", JSON.stringify(updated));
+  const deleteContact = async (contact: EmergencyContactRecord, index: number) => {
+    try {
+      if (contact.id) {
+        await ApiService.emergency.deleteContact(contact.id);
+      }
+      const updated = contacts.filter((_, i) => i !== index);
+      setContacts(updated);
+      await AsyncStorage.setItem("emergencyContacts", JSON.stringify(updated));
+    } catch (err: any) {
+      console.error("Failed to delete contact from backend:", err);
+      Alert.alert("Error", err.response?.data?.message || "Failed to delete contact from database.");
+    }
   };
 
-  // --------------- SOS Logic ---------------
-  const triggerSOS = () => {
+  // --------------- SOS Logic: Persistent MySQL sos_logs + Phone Dialing ---------------
+  const triggerSOS = async () => {
     if (sosCooldownRef.current) return;
     sosCooldownRef.current = true;
     setTimeout(() => {
@@ -197,12 +348,44 @@ export default function SafetyScreen() {
       return;
     }
 
-    contacts.forEach((phone) => {
-      const cleaned = phone.replace(/\s+/g, "");
-      Linking.openURL(`tel:${cleaned}`);
+    // Direct phone dial to all registered contacts
+    contacts.forEach((c) => {
+      const cleaned = (c.phone || "").replace(/\s+/g, "");
+      if (cleaned) {
+        Linking.openURL(`tel:${cleaned}`);
+      }
     });
 
-    Alert.alert("🚨 SOS Triggered", "Calling all emergency contacts!");
+    // Record persistent SOS in MySQL database with real GPS coordinates
+    try {
+      let lat = 0;
+      let lng = 0;
+      let acc = 0;
+
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === "granted") {
+        try {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          lat = loc.coords.latitude;
+          lng = loc.coords.longitude;
+          acc = loc.coords.accuracy || 0;
+        } catch (locErr) {
+          console.warn("Could not retrieve location for SOS record:", locErr);
+        }
+      }
+
+      await ApiService.sos.triggerSOS({
+        latitude: lat,
+        longitude: lng,
+        accuracy: acc,
+        battery_level: 100,
+      });
+
+      Alert.alert("🚨 SOS Triggered", "Emergency alert recorded in database & calling contacts!");
+    } catch (apiErr: any) {
+      console.error("Failed to record SOS in database:", apiErr);
+      Alert.alert("🚨 SOS Local Triggered", "Emergency call placed, but server failed to log SOS event.");
+    }
   };
 
   // --------------- Nearby Police (Expo Location + Linking) ---------------
@@ -271,6 +454,9 @@ export default function SafetyScreen() {
           />
         </View>
 
+        {/* IoT Wearable Status Card */}
+        <IoTStatusCard />
+
         {error && (
           <View style={styles.errorBox}>
             <Ionicons name="warning" size={18} color="#d50000" style={{ marginRight: 6 }} />
@@ -296,23 +482,20 @@ export default function SafetyScreen() {
 
         <FeatureCard
           icon={<MaterialCommunityIcons name="heart-pulse" size={26} color="#fff" />}
-          title="Heartbeat Monitoring"
+          title="Hardware Pulse Monitoring"
           description={
-            measuring
-              ? "Measuring pulse..."
-              : heartRateValue
-              ? `Current Heartbeat: ${heartRateValue} BPM`
-              : "Place finger on camera lens to measure"
+            typeof (liveBpm || bleService.latestBpm) === "number" && (liveBpm || bleService.latestBpm)! > 0
+              ? `Current Heartbeat: ${liveBpm || bleService.latestBpm} BPM`
+              : bleState === 'ESP32 ONLINE' || bleState === 'RECEIVING SENSOR DATA' || bleState === 'SUBSCRIBED TO SENSOR NOTIFICATIONS'
+              ? "Waiting for sensor... (-- BPM)"
+              : bleState === 'CONNECTED - WAITING FOR ESP32 DATA'
+              ? "CONNECTED - WAITING FOR ESP32 DATA"
+              : bleState === 'SCANNING FOR ESP32' || bleState === 'CONNECTING' || bleState === 'ESP32 FOUND'
+              ? `${bleState}...`
+              : "Sensor not connected (-- BPM)"
           }
-          onPress={startHeartbeatMonitoring}
+          onPress={checkHeartbeatSensor}
         />
-
-        {measuring && (
-          <View style={styles.measuringBox}>
-            <ActivityIndicator size="small" color="#ff80ab" />
-            <Text style={styles.measuringText}>Analyzing pulse rate...</Text>
-          </View>
-        )}
 
         <FeatureCard
           icon={<Ionicons name="navigate-circle" size={26} color="#fff" />}
@@ -350,14 +533,6 @@ export default function SafetyScreen() {
         </TouchableOpacity>
       </ScrollView>
 
-      {cameraActive && permission?.granted && (
-        <CameraView
-          ref={cameraRef}
-          style={{ width: 1, height: 1 }} // hidden
-          facing="back"
-        />
-      )}
-
       {/* Contact Modal */}
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalContainer}>
@@ -369,6 +544,14 @@ export default function SafetyScreen() {
 
             <TextInput
               style={styles.modalInput}
+              placeholder="Contact Name (e.g. Mom, Doctor)"
+              placeholderTextColor="#9c88b0"
+              value={newContactName}
+              onChangeText={setNewContactName}
+            />
+
+            <TextInput
+              style={[styles.modalInput, { marginTop: 10 }]}
               placeholder="Enter phone number"
               placeholderTextColor="#9c88b0"
               keyboardType="phone-pad"
@@ -395,14 +578,17 @@ export default function SafetyScreen() {
             <FlatList
               data={contacts}
               style={{ marginTop: 15, maxHeight: 180 }}
-              keyExtractor={(_: string, index: number) => index.toString()}
-              renderItem={({ item, index }: { item: string; index: number }) => (
+              keyExtractor={(item: EmergencyContactRecord, index: number) => (item.id ? item.id.toString() : index.toString())}
+              renderItem={({ item, index }: { item: EmergencyContactRecord; index: number }) => (
                 <View style={styles.contactItemRow}>
-                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", flex: 1, marginRight: 8 }}>
                     <Ionicons name="call" size={16} color="#8e24aa" style={{ marginRight: 8 }} />
-                    <Text style={styles.contactPhoneText}>{item}</Text>
+                    <View>
+                      {item.name ? <Text style={[styles.contactPhoneText, { fontWeight: "700" }]}>{item.name}</Text> : null}
+                      <Text style={styles.contactPhoneText}>{item.phone}</Text>
+                    </View>
                   </View>
-                  <TouchableOpacity onPress={() => deleteContact(index)}>
+                  <TouchableOpacity onPress={() => deleteContact(item, index)}>
                     <Ionicons name="trash" size={18} color="#e53935" />
                   </TouchableOpacity>
                 </View>

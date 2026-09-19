@@ -20,6 +20,8 @@ import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import { router } from "expo-router";
 import { AmbientBackground } from "@/components/ui/AmbientBackground";
 import { AuthService } from "@/services/AuthService";
+import { IoTService, IoTDeviceStatus } from "@/services/IoTService";
+import { ApiService } from "@/services/ApiService";
 
 const { width } = Dimensions.get("window");
 
@@ -43,12 +45,13 @@ export default function HomeScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [hoorayModalVisible, setHoorayModalVisible] = useState(false);
   const [profileModalVisible, setProfileModalVisible] = useState(false);
+  const [iotStatus, setIotStatus] = useState<IoTDeviceStatus | null>(null);
 
   // 🔁 Load the *current* logged-in user's name & email whenever Home comes into focus
   useFocusEffect(
     useCallback(() => {
       let isMounted = true;
-      const loadUser = async () => {
+      const loadUserAndIoT = async () => {
         try {
           const loggedIn = await AuthService.isLoggedIn();
           if (!loggedIn) {
@@ -62,11 +65,16 @@ export default function HomeScreen() {
             setUserName(storedName ?? "");
             setUserEmail(storedEmail ?? "");
           }
+
+          const status = await IoTService.getDeviceStatus();
+          if (isMounted) {
+            setIotStatus(status);
+          }
         } catch (e) {
-          console.log("Error loading user info", e);
+          console.log("Error loading user/IoT info", e);
         }
       };
-      loadUser();
+      loadUserAndIoT();
       return () => {
         isMounted = false;
       };
@@ -93,48 +101,119 @@ export default function HomeScreen() {
     );
   };
 
-  // Load saved challenges once
-  useEffect(() => {
-    const loadChallenges = async () => {
+  // Load saved challenges from MySQL database with cache fallback
+  const loadChallenges = async () => {
+    try {
+      const res = await ApiService.wellness.getChallenges();
+      const items = res?.data || (Array.isArray(res) ? res : []);
+      if (Array.isArray(items) && items.length > 0) {
+        const formatted: Challenge[] = items.map((c: any) => ({
+          id: c.id,
+          text: c.title,
+          done: c.status === "completed",
+        }));
+        setChallenges(formatted);
+        await AsyncStorage.setItem("challenges", JSON.stringify(formatted));
+        return;
+      } else if (Array.isArray(items) && items.length === 0) {
+        // Seed default challenges to MySQL for initial user experience
+        const defaultChallenges = [
+          "Drink 8 cups of water 💧",
+          "Take a 20 min walk 🚶‍♀️",
+          "Meditate for 10 min 🧘",
+        ];
+        const seeded: Challenge[] = [];
+        for (const title of defaultChallenges) {
+          try {
+            const created = await ApiService.wellness.createChallenge({ title, status: "pending" });
+            const item = created?.data || created;
+            seeded.push({ id: item.id || Date.now(), text: title, done: false });
+          } catch (e) {
+            // ignore seed error
+          }
+        }
+        if (seeded.length > 0) {
+          setChallenges(seeded);
+          await AsyncStorage.setItem("challenges", JSON.stringify(seeded));
+          return;
+        }
+      }
+    } catch (e) {
+      console.log("Error fetching wellness challenges from API, falling back to cache:", e);
+    }
+
+    // Fallback to cache if network is unavailable
+    try {
       const saved = await AsyncStorage.getItem("challenges");
-      if (saved) setChallenges(JSON.parse(saved));
-      else
+      if (saved) {
+        setChallenges(JSON.parse(saved));
+      } else {
         setChallenges([
           { id: 1, text: "Drink 8 cups of water 💧", done: false },
           { id: 2, text: "Take a 20 min walk 🚶‍♀️", done: false },
           { id: 3, text: "Meditate for 10 min 🧘", done: false },
         ]);
-    };
+      }
+    } catch (cacheErr) {
+      console.log("Error reading challenges cache", cacheErr);
+    }
+  };
+
+  useEffect(() => {
     loadChallenges();
   }, []);
 
-  const saveChallenges = async (updated: Challenge[]) => {
+  const toggleChallenge = async (id: number) => {
+    const target = challenges.find((c) => c.id === id);
+    if (!target) return;
+    const nextDone = !target.done;
+    const updated = challenges.map((c) =>
+      c.id === id ? { ...c, done: nextDone } : c
+    );
     setChallenges(updated);
     await AsyncStorage.setItem("challenges", JSON.stringify(updated));
-  };
-
-  const toggleChallenge = (id: number) => {
-    const updated = challenges.map((c) =>
-      c.id === id ? { ...c, done: !c.done } : c
-    );
-    saveChallenges(updated);
     if (updated.every((c) => c.done)) setHoorayModalVisible(true);
+
+    try {
+      await ApiService.wellness.updateChallenge(id, nextDone ? "completed" : "pending");
+    } catch (err) {
+      console.warn("Failed to persist challenge toggle to database:", err);
+    }
   };
 
-  const deleteChallenge = (id: number) => {
+  const deleteChallenge = async (id: number) => {
     const updated = challenges.filter((c) => c.id !== id);
-    saveChallenges(updated);
+    setChallenges(updated);
+    await AsyncStorage.setItem("challenges", JSON.stringify(updated));
+
+    try {
+      await ApiService.wellness.deleteChallenge(id);
+    } catch (err) {
+      console.warn("Failed to delete challenge from database:", err);
+    }
   };
 
-  const addChallenge = () => {
+  const addChallenge = async () => {
     if (!newChallenge.trim()) return;
-    const updated = [
-      ...challenges,
-      { id: Date.now(), text: newChallenge, done: false },
-    ];
-    saveChallenges(updated);
+    const title = newChallenge.trim();
     setNewChallenge("");
     setModalVisible(false);
+
+    try {
+      const res = await ApiService.wellness.createChallenge({ title, status: "pending" });
+      const record = res?.data || res;
+      const createdChallenge: Challenge = {
+        id: record.id || Date.now(),
+        text: title,
+        done: false,
+      };
+      const updated = [...challenges, createdChallenge];
+      setChallenges(updated);
+      await AsyncStorage.setItem("challenges", JSON.stringify(updated));
+    } catch (err: any) {
+      console.error("Failed to add challenge to database:", err);
+      Alert.alert("Error", err.response?.data?.message || "Failed to save challenge to server.");
+    }
   };
 
   return (
@@ -186,6 +265,43 @@ export default function HomeScreen() {
             ))}
           </Swiper>
         </View>
+
+        {/* IoT Live Status Chip */}
+        {iotStatus?.isConfigured && (
+          <TouchableOpacity
+            style={styles.iotHomeBadge}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate("safety")}
+          >
+            <View style={styles.iotHomeLeft}>
+              <View
+                style={[
+                  styles.iotDot,
+                  { backgroundColor: iotStatus.isOnline ? "#00c853" : "#9e9e9e" },
+                ]}
+              />
+              <Text style={styles.iotHomeTitle}>
+                {iotStatus.device?.deviceName || "IoT Wearable"}
+              </Text>
+            </View>
+            <View style={styles.iotHomeRight}>
+              {iotStatus.device?.lastHeartRate ? (
+                <Text style={styles.iotHeartRate}>
+                  💓 {iotStatus.device.lastHeartRate} BPM
+                </Text>
+              ) : null}
+              <Text
+                style={[
+                  styles.iotStatusText,
+                  { color: iotStatus.isOnline ? "#00c853" : "#757575" },
+                ]}
+              >
+                {iotStatus.isOnline ? "Connected" : "Offline"}
+              </Text>
+              <Ionicons name="chevron-forward" size={14} color="#a090b0" style={{ marginLeft: 4 }} />
+            </View>
+          </TouchableOpacity>
+        )}
 
         {/* Quick Nav Header */}
         <Text style={styles.sectionHeaderTitle}>⚡ Quick Access</Text>
@@ -866,5 +982,52 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
+  iotHomeBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#ffffff",
+    borderRadius: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "rgba(142, 36, 170, 0.1)",
+    shadowColor: "#0F031D",
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 2,
+  },
+  iotHomeLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  iotDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  iotHomeTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#2a0845",
+  },
+  iotHomeRight: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  iotHeartRate: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#e91e63",
+    marginRight: 8,
+  },
+  iotStatusText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
 });
+
 

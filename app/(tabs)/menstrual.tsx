@@ -1,5 +1,5 @@
 // menstrual.tsx
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import {
   View,
   Text,
@@ -10,9 +10,13 @@ import {
   ScrollView,
   FlatList,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import { useFocusEffect } from "@react-navigation/native";
+import { Ionicons } from "@expo/vector-icons";
 import { AmbientBackground } from "@/components/ui/AmbientBackground";
+import { ApiService } from "@/services/ApiService";
 
 type CycleEntry = {
   id: string;
@@ -146,46 +150,166 @@ export default function MenstrualScreen() {
     return Math.round(sum / vals.length);
   }, [cycleHistory]);
 
-  const handleSaveCycle = () => {
+  // Load persisted cycles and symptoms from MySQL on screen focus
+  const loadMenstrualData = useCallback(async () => {
+    try {
+      const cycleRes = await ApiService.menstrual.getCycles();
+      if (cycleRes?.data?.cycles && Array.isArray(cycleRes.data.cycles)) {
+        const serverCycles: CycleEntry[] = cycleRes.data.cycles.map((c: any) => {
+          const start = c.last_period_date ? c.last_period_date.split("T")[0] : "";
+          const endDate = new Date(start);
+          endDate.setDate(endDate.getDate() + (c.period_length || 5) - 1);
+          return {
+            id: String(c.id),
+            startDate: start,
+            endDate: formatDate(endDate),
+            length: c.cycle_length,
+          };
+        });
+        setCycleHistory(serverCycles);
+
+        if (serverCycles.length > 0 && serverCycles[0].startDate) {
+          setLastPeriodStart(serverCycles[0].startDate);
+          if (serverCycles[0].length) {
+            setCycleLength(String(serverCycles[0].length));
+          }
+        }
+      }
+
+      const symRes = await ApiService.symptoms.getSymptoms();
+      if (symRes?.data && Array.isArray(symRes.data)) {
+        setSymptomLogs(
+          symRes.data.map((s: any) => ({
+            id: String(s.id),
+            date: s.date ? s.date.split("T")[0] : "",
+            symptoms: s.symptom || "",
+            mood: s.mood || "",
+            notes: s.notes || "",
+          }))
+        );
+      }
+    } catch (err) {
+      console.log("[Menstrual] Error loading saved data from MySQL:", err);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadMenstrualData();
+    }, [loadMenstrualData])
+  );
+
+  const handleSaveCycle = async () => {
     const start = parseDate(lastPeriodStart);
     if (!start) {
       Alert.alert("Invalid date", "Please use the format YYYY-MM-DD.");
       return;
     }
 
-    const end = new Date(start);
-    end.setDate(end.getDate() + 4); // pretend 5-day period for history
     const length = numericCycleLength;
+    try {
+      const res = await ApiService.menstrual.addCycle({
+        last_period_date: formatDate(start),
+        cycle_length: length,
+        period_length: 5,
+      });
 
-    const newEntry: CycleEntry = {
-      id: `${Date.now()}`,
-      startDate: formatDate(start),
-      endDate: formatDate(end),
-      length,
-    };
+      const saved = res?.data;
+      const end = new Date(start);
+      end.setDate(end.getDate() + 4);
 
-    setCycleHistory((prev) => [newEntry, ...prev]);
-    Alert.alert("Saved", "Cycle added to history.");
+      const newEntry: CycleEntry = {
+        id: String(saved?.id || Date.now()),
+        startDate: formatDate(start),
+        endDate: formatDate(end),
+        length,
+      };
+
+      setCycleHistory((prev) => [newEntry, ...prev.filter((c) => c.id !== newEntry.id)]);
+      Alert.alert("Saved", "Cycle added to database successfully.");
+    } catch (e: any) {
+      console.error("Failed to save menstrual cycle:", e);
+      Alert.alert("Save Error", e?.response?.data?.message || "Could not persist cycle to database.");
+    }
   };
 
-  const handleAddSymptomLog = () => {
+  const handleDeleteCycle = (id: string) => {
+    Alert.alert(
+      "Delete Cycle Record",
+      "Are you sure you want to remove this cycle entry from the database?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await ApiService.menstrual.deleteCycle(Number(id));
+              setCycleHistory((prev) => prev.filter((c) => c.id !== id));
+            } catch (e: any) {
+              Alert.alert("Delete Error", "Could not delete cycle record.");
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleAddSymptomLog = async () => {
     if (!symptoms && !mood && !notes) {
       Alert.alert("Add details", "Please log at least one field (symptoms, mood, or notes).");
       return;
     }
     const date = parseDate(symptomDate) ? symptomDate : formatDate(new Date());
-    const newEntry: SymptomEntry = {
-      id: `${Date.now()}`,
-      date,
-      symptoms,
-      mood,
-      notes,
-    };
-    setSymptomLogs((prev) => [newEntry, ...prev]);
-    setSymptoms("");
-    setMood("");
-    setNotes("");
-    Alert.alert("Logged", "Your symptoms have been saved.");
+    try {
+      const res = await ApiService.symptoms.addSymptom({
+        date,
+        symptom: symptoms.trim() || "General",
+        mood: mood.trim() || undefined,
+        notes: notes.trim() || undefined,
+        severity: 1,
+      });
+
+      const saved = res?.data;
+      const newEntry: SymptomEntry = {
+        id: String(saved?.id || Date.now()),
+        date,
+        symptoms: symptoms.trim() || "General",
+        mood: mood.trim(),
+        notes: notes.trim(),
+      };
+
+      setSymptomLogs((prev) => [newEntry, ...prev]);
+      setSymptoms("");
+      setMood("");
+      setNotes("");
+      Alert.alert("Logged", "Your symptoms have been saved to the database.");
+    } catch (e: any) {
+      console.error("Failed to save symptoms:", e);
+      Alert.alert("Save Error", e?.response?.data?.message || "Could not persist symptoms to database.");
+    }
+  };
+
+  const handleDeleteSymptom = (id: string) => {
+    Alert.alert(
+      "Delete Symptom Log",
+      "Are you sure you want to remove this symptom log from the database?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await ApiService.symptoms.deleteSymptom(Number(id));
+              setSymptomLogs((prev) => prev.filter((s) => s.id !== id));
+            } catch (e: any) {
+              Alert.alert("Delete Error", "Could not delete symptom log.");
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleAddReminder = () => {
@@ -431,17 +555,25 @@ export default function MenstrualScreen() {
                 keyExtractor={(item) => item.id}
                 scrollEnabled={false}
                 renderItem={({ item }) => (
-                  <View style={styles.listItem}>
-                    <Text style={styles.listItemTitle}>{item.date}</Text>
-                    {!!item.symptoms && (
-                      <Text style={styles.listItemSubtitle}>Symptoms: {item.symptoms}</Text>
-                    )}
-                    {!!item.mood && (
-                      <Text style={styles.listItemSubtitle}>Mood: {item.mood}</Text>
-                    )}
-                    {!!item.notes && (
-                      <Text style={styles.listItemSubtitle}>Notes: {item.notes}</Text>
-                    )}
+                  <View style={[styles.listItem, { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.listItemTitle}>{item.date}</Text>
+                      {!!item.symptoms && (
+                        <Text style={styles.listItemSubtitle}>Symptoms: {item.symptoms}</Text>
+                      )}
+                      {!!item.mood && (
+                        <Text style={styles.listItemSubtitle}>Mood: {item.mood}</Text>
+                      )}
+                      {!!item.notes && (
+                        <Text style={styles.listItemSubtitle}>Notes: {item.notes}</Text>
+                      )}
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => handleDeleteSymptom(item.id)}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Ionicons name="trash-outline" size={18} color="#d32f2f" />
+                    </TouchableOpacity>
                   </View>
                 )}
               />
@@ -467,13 +599,21 @@ export default function MenstrualScreen() {
             <View style={styles.sectionList}>
               <Text style={styles.sectionTitle}>Past Cycles</Text>
               {cycleHistory.map((c) => (
-                <View key={c.id} style={styles.listItem}>
-                  <Text style={styles.listItemTitle}>
-                    {c.startDate} → {c.endDate}
-                  </Text>
-                  {typeof c.length === "number" && (
-                    <Text style={styles.listItemSubtitle}>Length: {c.length} days</Text>
-                  )}
+                <View key={c.id} style={[styles.listItem, { flexDirection: "row", justifyContent: "space-between", alignItems: "center" }]}>
+                  <View>
+                    <Text style={styles.listItemTitle}>
+                      {c.startDate} → {c.endDate}
+                    </Text>
+                    {typeof c.length === "number" && (
+                      <Text style={styles.listItemSubtitle}>Length: {c.length} days</Text>
+                    )}
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => handleDeleteCycle(c.id)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Ionicons name="trash-outline" size={18} color="#d32f2f" />
+                  </TouchableOpacity>
                 </View>
               ))}
             </View>

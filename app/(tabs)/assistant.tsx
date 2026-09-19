@@ -19,6 +19,7 @@ import { GeminiService } from '../../services/GeminiService';
 import { EmergencyDetectionService } from '../../services/EmergencyDetectionService';
 import { ChatSessionService, ChatSession } from '../../services/ChatSessionService';
 import { ChatMessage } from '../../services/AIServiceInterface';
+import { ApiService } from '../../services/ApiService';
 
 const geminiService = new GeminiService();
 
@@ -42,7 +43,33 @@ export default function AssistantScreen() {
 
   const initAssistant = async () => {
     await ChatSessionService.migrateLegacyHistoryIfNeeded();
-    const allSessions = await ChatSessionService.getAllSessions();
+    let allSessions = await ChatSessionService.getAllSessions();
+
+    // Sync from MySQL assistant_chat table if local cache is empty
+    try {
+      const res = await ApiService.assistant.getHistory(50);
+      const rows = res?.data || (Array.isArray(res) ? res : []);
+      if (Array.isArray(rows) && rows.length > 0 && allSessions.length === 0) {
+        const syncedMessages: ChatMessage[] = rows.map((r: any) => ({
+          id: r.id.toString(),
+          sender: r.role,
+          text: r.message,
+          timestamp: Number(r.timestamp) || new Date(r.created_at).getTime() || Date.now(),
+        }));
+        const syncedSession: ChatSession = {
+          id: 'synced_session',
+          title: 'Previous Conversation',
+          createdAt: syncedMessages[0]?.timestamp || Date.now(),
+          updatedAt: syncedMessages[syncedMessages.length - 1]?.timestamp || Date.now(),
+          messages: syncedMessages,
+        };
+        await ChatSessionService.saveSession(syncedSession);
+        allSessions = await ChatSessionService.getAllSessions();
+      }
+    } catch (e) {
+      console.log('Error syncing remote assistant history:', e);
+    }
+
     setSessions(allSessions);
 
     // Requirement #8: Open a fresh blank chat by default on app start.
@@ -133,6 +160,13 @@ export default function AssistantScreen() {
     await ChatSessionService.setActiveSessionId(updatedSession.id);
     refreshSessions();
 
+    // Persist user message to MySQL database
+    ApiService.assistant.saveChat({
+      role: 'user',
+      message: userMsg.text,
+      timestamp: userMsg.timestamp,
+    }).catch(err => console.warn('Could not persist user chat message to MySQL:', err));
+
     // Check for emergency keywords first
     if (EmergencyDetectionService.detectEmergency(userMsg.text)) {
       const emergencyMsg: ChatMessage = {
@@ -152,6 +186,13 @@ export default function AssistantScreen() {
       await ChatSessionService.saveSession(sessionWithEmergency);
       refreshSessions();
       updatedMessages.push(emergencyMsg); // include in context window
+
+      // Persist emergency assistant response to MySQL database
+      ApiService.assistant.saveChat({
+        role: 'assistant',
+        message: emergencyMsg.text,
+        timestamp: emergencyMsg.timestamp,
+      }).catch(err => console.warn('Could not persist emergency chat response to MySQL:', err));
     }
 
     try {
@@ -165,6 +206,13 @@ export default function AssistantScreen() {
 
       const finalMessages = [...updatedMessages, aiMsg];
       setMessages(finalMessages);
+
+      // Persist AI assistant response to MySQL database
+      ApiService.assistant.saveChat({
+        role: 'assistant',
+        message: aiMsg.text,
+        timestamp: aiMsg.timestamp,
+      }).catch(err => console.warn('Could not persist AI chat response to MySQL:', err));
 
       // Automatic chat title generation after first AI response
       let finalTitle = currentSession.title;
