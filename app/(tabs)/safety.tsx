@@ -206,16 +206,16 @@ export default function SafetyScreen() {
       }
 
       // Fall detection – very low acceleration (phone dropped / free fall)
-      if (!alertTriggered && force < 0.5) {
+      if (!alertTriggeredRef.current && force < 0.5) {
         setFallDetected(true);
         alertTriggeredRef.current = true;
         Alert.alert("⚠ Fall Detected!", "Your phone was dropped!");
         void triggerSOSRef.current();
       }
     });
-  };
+  }, []);
 
-  const stopSensors = () => {
+  const stopSensors = useCallback(() => {
     if (accelSubscription.current) {
       accelSubscription.current.remove();
       accelSubscription.current = null;
