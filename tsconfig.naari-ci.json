@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "services/BleService.ts",
+    "app/(tabs)/safety.tsx",
+    "expo-env.d.ts"
+  ],
+  "exclude": [
+    "server/**"
+  ]
+}
