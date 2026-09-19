@@ -44,6 +44,8 @@ export default function SafetyScreen() {
   const [shakeCount, setShakeCount] = useState(0);
   const [iotStatus, setIotStatus] = useState<IoTDeviceStatus | null>(null);
   const [liveBpm, setLiveBpm] = useState<number | null>(null);
+  const [liveSpo2, setLiveSpo2] = useState<number | null>(null);
+  const [hardwareSensorStatus, setHardwareSensorStatus] = useState<string | null>(null);
   const [bleState, setBleState] = useState<BleDetailedState>('DISCONNECTED');
   const [error, setError] = useState<string | null>(null);
 
@@ -87,6 +89,15 @@ export default function SafetyScreen() {
       } else if (event.type === 'HEARTBEAT' && typeof event.bpm === 'number') {
         setLiveBpm(event.bpm);
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } else if (event.type === 'SPO2' && typeof event.spo2 === 'number') {
+        setLiveSpo2(event.spo2);
+      } else if (event.type === 'SENSOR_STATUS' && event.sensorStatus) {
+        setHardwareSensorStatus(event.sensorStatus);
+      } else if (event.type === 'VITALS_STATUS' && event.vitalsStatus) {
+        if (event.vitalsStatus.toUpperCase().includes('NO_VALID_READING')) {
+          setLiveBpm(null);
+          setLiveSpo2(null);
+        }
       } else if (event.type === 'FALL_DETECTED') {
         setFallDetected(true);
         setAlertTriggered(true);
@@ -218,25 +229,57 @@ export default function SafetyScreen() {
     setShakeCount(0);
   };
 
-  // --------------- Real ESP32 MAX30102 Heartbeat Sensor ---------------
+  // --------------- Real ESP32 MAX3010x Heart Rate + SpO2 Sensor ---------------
   const checkHeartbeatSensor = async () => {
     await fetchIotTelemetry();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    const effectiveBpm = liveBpm || bleService.latestBpm || iotStatus?.device?.lastHeartRate;
+    const effectiveBpm = liveBpm ?? bleService.latestBpm ?? iotStatus?.device?.lastHeartRate ?? null;
+    const effectiveSpo2 = liveSpo2 ?? bleService.latestSpO2 ?? null;
 
-    if (typeof effectiveBpm === "number" && effectiveBpm > 0) {
+    if (
+      (typeof effectiveBpm === "number" && effectiveBpm > 0) ||
+      (typeof effectiveSpo2 === "number" && effectiveSpo2 > 0)
+    ) {
+      const lines: string[] = [];
+
+      if (typeof effectiveBpm === "number" && effectiveBpm > 0) {
+        lines.push(`Heart rate: ${effectiveBpm} BPM`);
+      }
+
+      if (typeof effectiveSpo2 === "number" && effectiveSpo2 > 0) {
+        lines.push(`SpO₂ estimate: ${effectiveSpo2}%`);
+      }
+
+      lines.push("");
+      lines.push("Readings come from the physical MAX3010x optical sensor; SpO₂ is a prototype estimate, not a medical diagnosis.");
+
+      Alert.alert("💓 Live Hardware Reading", lines.join("\n"));
+      return;
+    }
+
+    if (
+      hardwareSensorStatus &&
+      (hardwareSensorStatus.includes('I2C_ERROR') ||
+        hardwareSensorStatus.includes('NOT_READY') ||
+        hardwareSensorStatus.includes('CONFIG_ERROR') ||
+        hardwareSensorStatus.includes('UNKNOWN_PART'))
+    ) {
       Alert.alert(
-        "💓 Live Pulse Reading",
-        `Real-time heart rate from ESP32 MAX30102 sensor: ${effectiveBpm} BPM`
+        "Optical Sensor Not Ready",
+        `ESP32 BLE is active, but the optical sensor reported: ${hardwareSensorStatus}. Check 3.3V, GND, SDA GPIO21 and SCL GPIO22.`
       );
       return;
     }
 
-    if (bleState === 'ESP32 ONLINE' || bleState === 'RECEIVING SENSOR DATA' || bleState === 'SUBSCRIBED TO SENSOR NOTIFICATIONS') {
+    if (
+      bleState === 'ESP32 ONLINE' ||
+      bleState === 'RECEIVING SENSOR DATA' ||
+      bleState === 'SUBSCRIBED TO SENSOR NOTIFICATIONS'
+    ) {
       Alert.alert(
         "Waiting for Sensor Reading",
-        "ESP32 is ONLINE and subscribed to notifications. Place your finger gently on the MAX30102 pulse sensor."
+        "ESP32 is online. Place your finger gently and steadily over the MAX3010x optical sensor while it acquires real red/IR samples."
       );
       return;
     }
@@ -250,10 +293,7 @@ export default function SafetyScreen() {
     }
 
     if (bleState === 'SCANNING FOR ESP32' || bleState === 'CONNECTING' || bleState === 'ESP32 FOUND') {
-      Alert.alert(
-        "Connecting to Wearable",
-        `Current Status: ${bleState}...`
-      );
+      Alert.alert("Connecting to Wearable", `Current Status: ${bleState}...`);
       return;
     }
 
@@ -482,17 +522,23 @@ export default function SafetyScreen() {
 
         <FeatureCard
           icon={<MaterialCommunityIcons name="heart-pulse" size={26} color="#fff" />}
-          title="Hardware Pulse Monitoring"
+          title="Hardware Heart Rate + SpO₂"
           description={
-            typeof (liveBpm || bleService.latestBpm) === "number" && (liveBpm || bleService.latestBpm)! > 0
-              ? `Current Heartbeat: ${liveBpm || bleService.latestBpm} BPM`
+            (liveBpm ?? bleService.latestBpm) || (liveSpo2 ?? bleService.latestSpO2)
+              ? `HR: ${liveBpm ?? bleService.latestBpm ?? '--'} BPM • SpO₂: ${liveSpo2 ?? bleService.latestSpO2 ?? '--'}%`
+              : hardwareSensorStatus &&
+                (hardwareSensorStatus.includes('I2C_ERROR') ||
+                  hardwareSensorStatus.includes('NOT_READY') ||
+                  hardwareSensorStatus.includes('CONFIG_ERROR') ||
+                  hardwareSensorStatus.includes('UNKNOWN_PART'))
+              ? "Optical sensor unavailable — tap for details"
               : bleState === 'ESP32 ONLINE' || bleState === 'RECEIVING SENSOR DATA' || bleState === 'SUBSCRIBED TO SENSOR NOTIFICATIONS'
-              ? "Waiting for sensor... (-- BPM)"
+              ? "Waiting for real optical reading..."
               : bleState === 'CONNECTED - WAITING FOR ESP32 DATA'
               ? "CONNECTED - WAITING FOR ESP32 DATA"
               : bleState === 'SCANNING FOR ESP32' || bleState === 'CONNECTING' || bleState === 'ESP32 FOUND'
               ? `${bleState}...`
-              : "Sensor not connected (-- BPM)"
+              : "Sensor not connected"
           }
           onPress={checkHeartbeatSensor}
         />
