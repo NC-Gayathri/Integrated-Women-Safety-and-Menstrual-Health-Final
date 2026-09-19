@@ -289,6 +289,19 @@ class BleService {
       console.log('[BLE] Connecting...');
 
       const connected = await device.connect({ autoConnect: false, timeout: 15000 });
+
+      // Negotiate an MTU large enough for the longest sensor-health packets.
+      // Core SOS/HR/SpO2 packets are already <= 20 bytes, so failure here is
+      // non-fatal and older devices can still use the essential path.
+      if (Platform.OS === 'android' && typeof connected.requestMTU === 'function') {
+        try {
+          await connected.requestMTU(64);
+          console.log('[BLE] Requested 64-byte MTU for complete diagnostic notifications.');
+        } catch (mtuError: any) {
+          console.warn('[BLE] MTU negotiation failed; continuing with essential short packets:', mtuError?.message || mtuError);
+        }
+      }
+
       this.connectedDevice = connected;
       console.log('[BLE] Connected');
 
