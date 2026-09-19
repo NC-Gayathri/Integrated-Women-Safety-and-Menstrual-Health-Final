@@ -107,4 +107,4 @@ jobs:
         run: npx eslint "services/BleService.ts" "app/(tabs)/safety.tsx"
 
       - name: TypeScript check
-        run: npx tsc --noEmit
+        run: npx tsc --noEmit -p tsconfig.naari-ci.json
