@@ -250,8 +250,7 @@ class BleService {
             const devName = (device.name || device.localName || '').trim();
 
             // Match advertised device name NAARI_KAVACH primarily without relying on MAC
-            const isNameMatch = devName.toLowerCase() === this.targetDeviceName.toLowerCase() ||
-              devName.toLowerCase().includes(this.targetDeviceName.toLowerCase());
+            const isNameMatch = devName.toLowerCase() === this.targetDeviceName.toLowerCase();
 
             if (isNameMatch) {
               console.log(`[BLE] Device found: ${devName} [${device.id}] (RSSI: ${device.rssi} dBm)`);
@@ -320,7 +319,9 @@ class BleService {
         this.scheduleReconnect(4000);
       });
 
-      // Discover GATT services & characteristics
+      // Discover the exact locked GATT service/characteristic contract.
+      // Do not fall back to arbitrary notify characteristics: a mismatch must
+      // be visible during integration instead of silently binding the wrong endpoint.
       console.log('[BLE] Discovering services and characteristics');
       const discovered = await connected.discoverAllServicesAndCharacteristics();
       const services = await discovered.services();
@@ -329,54 +330,28 @@ class BleService {
 
       for (const service of services) {
         const sUuid = service.uuid.toLowerCase();
-        if (sUuid === this.targetServiceUUID || sUuid.includes(this.targetServiceUUID)) {
-          console.log(`[BLE] Service found:\n${this.targetServiceUUID}`);
-          this.diagnostics.serviceFound = true;
-          this.emitDiagnostics();
-        }
+        if (sUuid !== this.targetServiceUUID) continue;
+
+        console.log(`[BLE] Exact service found: ${this.targetServiceUUID}`);
+        this.diagnostics.serviceFound = true;
+        this.emitDiagnostics();
 
         const characteristics = await service.characteristics();
         for (const char of characteristics) {
           const cUuid = char.uuid.toLowerCase();
-          const isNotifiable = char.isNotifiable || char.isIndicatable;
+          const isNotifiable = !!(char.isNotifiable || char.isIndicatable);
 
-          // Match exact target Characteristic UUID
-          if (
-            cUuid === this.targetCharUUID ||
-            this.targetCharUUID.includes(cUuid) ||
-            cUuid.includes(this.targetCharUUID)
-          ) {
-            console.log(`[BLE] Characteristic found:\n${this.targetCharUUID}`);
+          if (cUuid === this.targetCharUUID && isNotifiable) {
+            console.log(`[BLE] Exact notify characteristic found: ${this.targetCharUUID}`);
             this.diagnostics.characteristicFound = true;
             this.emitDiagnostics();
             this.subscribeToCharacteristic(char);
             targetSubscribed = true;
-          } else if (sUuid === this.targetServiceUUID && isNotifiable && !targetSubscribed) {
-            console.log(`[BLE] Subscribing to service characteristic: ${char.uuid}`);
-            this.diagnostics.characteristicFound = true;
-            this.emitDiagnostics();
-            this.subscribeToCharacteristic(char);
-            targetSubscribed = true;
+            break;
           }
         }
-      }
 
-      if (!targetSubscribed) {
-        console.warn('[BLE] Characteristic not explicitly found, checking all notify characteristics...');
-        for (const service of services) {
-          const characteristics = await service.characteristics();
-          for (const char of characteristics) {
-            if (char.isNotifiable || char.isIndicatable) {
-              console.log(`[BLE] Fallback characteristic found: ${char.uuid}`);
-              this.diagnostics.characteristicFound = true;
-              this.emitDiagnostics();
-              this.subscribeToCharacteristic(char);
-              targetSubscribed = true;
-              break;
-            }
-          }
-          if (targetSubscribed) break;
-        }
+        break;
       }
 
       if (targetSubscribed) {
@@ -385,7 +360,16 @@ class BleService {
         this.emitDiagnostics();
         this.updateStatus('SUBSCRIBED TO SENSOR NOTIFICATIONS');
       } else {
-        this.updateStatus('ERROR', 'Could not subscribe to notification characteristic.');
+        const reason = this.diagnostics.serviceFound
+          ? 'Expected BLE notify characteristic UUID was not found/notifiable.'
+          : 'Expected BLE service UUID was not found.';
+        console.error(`[BLE] Contract mismatch: ${reason}`);
+        this.updateStatus('ERROR', reason);
+        try {
+          await connected.cancelConnection();
+        } catch (disconnectError) {}
+        this.cleanupConnection();
+        this.scheduleReconnect(5000);
       }
     } catch (err: any) {
       console.error('[BLE] Connection error:', err);
