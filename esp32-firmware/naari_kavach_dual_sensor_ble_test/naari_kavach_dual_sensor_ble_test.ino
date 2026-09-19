@@ -41,6 +41,7 @@
 #define DEVICE_NAME         "NAARI_KAVACH"
 #define SERVICE_UUID        "12345678-1234-1234-1234-1234567890ab"
 #define CHARACTERISTIC_UUID "87654321-4321-4321-4321-ba0987654321"
+#define BLE_MTU             64
 
 BLEServer* pServer = nullptr;
 BLECharacteristic* pTxCharacteristic = nullptr;
@@ -356,6 +357,7 @@ uint8_t opticalConsecutiveErrors = 0;
 unsigned long lastOpticalRetry = 0;
 unsigned long lastVitalsReport = 0;
 unsigned long lastSensorStatusReport = 0;
+unsigned long lastHealthSnapshotReport = 0;
 unsigned long lastOpticalSampleAt = 0;
 
 // Real-signal processing state.
@@ -787,8 +789,11 @@ void setup() {
   Serial.println("Wi-Fi: DISABLED");
   Serial.println("HTTP: DISABLED");
 
-  // BLE starts regardless of sensor health.
+  // BLE starts regardless of sensor health. A 64-byte MTU keeps every
+  // diagnostic/status payload intact on clients that negotiate above the
+  // legacy 20-byte notification payload limit.
   BLEDevice::init(DEVICE_NAME);
+  BLEDevice::setMTU(BLE_MTU);
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
@@ -827,6 +832,7 @@ void loop() {
     oldDeviceConnected = true;
     sendBleEvent("STATUS:ONLINE");
     sendSensorHealthSnapshot();
+    lastHealthSnapshotReport = millis();
   } else if (!deviceConnected && oldDeviceConnected) {
     oldDeviceConnected = false;
     pServer->startAdvertising();
@@ -838,6 +844,14 @@ void loop() {
 
   updateOpticalSensor();
   updateButtonState();
+
+  // Re-announce health after the client has had time to subscribe. This also
+  // makes a lost/truncated first notification self-healing.
+  if (deviceConnected &&
+      (millis() - lastHealthSnapshotReport >= SENSOR_STATUS_INTERVAL_MS)) {
+    lastHealthSnapshotReport = millis();
+    sendSensorHealthSnapshot();
+  }
 
   updateLed();
 
