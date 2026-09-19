@@ -10,7 +10,6 @@ import {
   TextInput,
   Modal,
   FlatList,
-  ActivityIndicator,
   Platform,
   AppState,
   AppStateStatus,
@@ -25,7 +24,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect } from "@react-navigation/native";
 import { IoTStatusCard } from "@/components/IoTStatusCard";
-import { IoTService, IoTDeviceStatus } from "@/services/IoTService";
+import { IoTService } from "@/services/IoTService";
 import { bleService, BleTelemetryEvent, BleDetailedState } from "@/services/BleService";
 import { ApiService } from "@/services/ApiService";
 
@@ -40,14 +39,11 @@ export interface EmergencyContactRecord {
 export default function SafetyScreen() {
   const [safetyOn, setSafetyOn] = useState(false);
   const [fallDetected, setFallDetected] = useState(false);
-  const [alertTriggered, setAlertTriggered] = useState(false);
-  const [shakeCount, setShakeCount] = useState(0);
-  const [iotStatus, setIotStatus] = useState<IoTDeviceStatus | null>(null);
+  const [, setShakeCount] = useState(0);
   const [liveBpm, setLiveBpm] = useState<number | null>(null);
   const [liveSpo2, setLiveSpo2] = useState<number | null>(null);
   const [hardwareSensorStatus, setHardwareSensorStatus] = useState<string | null>(null);
   const [bleState, setBleState] = useState<BleDetailedState>('DISCONNECTED');
-  const [error, setError] = useState<string | null>(null);
 
   const [contacts, setContacts] = useState<EmergencyContactRecord[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
@@ -57,13 +53,18 @@ export default function SafetyScreen() {
   const accelSubscription = useRef<any>(null);
   const sosCooldownRef = useRef(false);
   const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const alertTriggeredRef = useRef(false);
+  const contactsRef = useRef<EmergencyContactRecord[]>([]);
+  const triggerSOSRef = useRef<() => Promise<void> | void>(() => {});
+
+  // Event listeners remain mounted while these refs always point at current state/behavior.
+  contactsRef.current = contacts;
 
   // Fetch real IoT device telemetry (heart rate, online status) from backend
   const fetchIotTelemetry = useCallback(async () => {
     try {
-      const data = await IoTService.getDeviceStatus();
-      setIotStatus(data);
-    } catch (e) {
+      await IoTService.getDeviceStatus();
+    } catch {
       // Ignore background fetch error
     }
   }, []);
@@ -109,12 +110,12 @@ export default function SafetyScreen() {
         }
       } else if (event.type === 'FALL_DETECTED') {
         setFallDetected(true);
-        setAlertTriggered(true);
+        alertTriggeredRef.current = true;
         Alert.alert("⚠ Hardware Fall Detected!", "ESP32 wearable detected a physical fall event!");
-        triggerSOS();
+        void triggerSOSRef.current();
       } else if (event.type === 'BUTTON_SOS') {
         Alert.alert("🚨 Physical SOS Triggered!", "ESP32 hardware emergency button was pressed!");
-        triggerSOS();
+        void triggerSOSRef.current();
       }
     });
 
@@ -164,23 +165,11 @@ export default function SafetyScreen() {
     loadContacts();
   }, []);
 
-  useEffect(() => {
-    if (safetyOn) {
-      startSensors(); // shake + fall in one listener
-    } else {
-      stopSensors();
-    }
-
-    return () => {
-      stopSensors();
-    };
-  }, [safetyOn]);
-
   // --------------- Shake + Fall Detection (Expo sensors) ---------------
-  const startSensors = () => {
+  const startSensors = useCallback(() => {
     setShakeCount(0);
     setFallDetected(false);
-    setAlertTriggered(false);
+    alertTriggeredRef.current = false;
 
     Accelerometer.setUpdateInterval(100);
 
@@ -204,7 +193,7 @@ export default function SafetyScreen() {
           }
 
           if (next >= 3) {
-            triggerSOS();
+            void triggerSOSRef.current();
             setShakeCount(0);
             if (shakeTimerRef.current) {
               clearTimeout(shakeTimerRef.current);
@@ -219,9 +208,9 @@ export default function SafetyScreen() {
       // Fall detection – very low acceleration (phone dropped / free fall)
       if (!alertTriggered && force < 0.5) {
         setFallDetected(true);
-        setAlertTriggered(true);
+        alertTriggeredRef.current = true;
         Alert.alert("⚠ Fall Detected!", "Your phone was dropped!");
-        triggerSOS();
+        void triggerSOSRef.current();
       }
     });
   };
@@ -236,7 +225,19 @@ export default function SafetyScreen() {
       shakeTimerRef.current = null;
     }
     setShakeCount(0);
-  };
+  }, []);
+
+  useEffect(() => {
+    if (safetyOn) {
+      startSensors(); // shake + fall in one listener
+    } else {
+      stopSensors();
+    }
+
+    return () => {
+      stopSensors();
+    };
+  }, [safetyOn, startSensors, stopSensors]);
 
   // --------------- Real ESP32 MAX3010x Heart Rate + SpO2 Sensor ---------------
   const checkHeartbeatSensor = async () => {
@@ -392,13 +393,15 @@ export default function SafetyScreen() {
       sosCooldownRef.current = false;
     }, 8000); // 8s cooldown
 
-    if (contacts.length === 0) {
+    const currentContacts = contactsRef.current;
+
+    if (currentContacts.length === 0) {
       Alert.alert("No Contacts", "Please add emergency contacts first!");
       return;
     }
 
     // Direct phone dial to all registered contacts
-    contacts.forEach((c) => {
+    currentContacts.forEach((c) => {
       const cleaned = (c.phone || "").replace(/\s+/g, "");
       if (cleaned) {
         Linking.openURL(`tel:${cleaned}`);
@@ -436,6 +439,7 @@ export default function SafetyScreen() {
       Alert.alert("🚨 SOS Local Triggered", "Emergency call placed, but server failed to log SOS event.");
     }
   };
+  triggerSOSRef.current = triggerSOS;
 
   // --------------- Nearby Police (Expo Location + Linking) ---------------
   const openNearbyPolice = async () => {
