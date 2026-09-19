@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
@@ -11,36 +11,134 @@ import {
   Modal,
   FlatList,
   ActivityIndicator,
+  Platform,
+  AppState,
+  AppStateStatus,
 } from "react-native";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { AmbientBackground } from "@/components/ui/AmbientBackground";
 import { Accelerometer } from "expo-sensors";
 import * as Location from "expo-location";
 import * as Linking from "expo-linking";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Haptics from "expo-haptics";
+import { useFocusEffect } from "@react-navigation/native";
+import { IoTStatusCard } from "@/components/IoTStatusCard";
+import { IoTService, IoTDeviceStatus } from "@/services/IoTService";
+import { bleService, BleTelemetryEvent, BleDetailedState } from "@/services/BleService";
+import { ApiService } from "@/services/ApiService";
+
+export interface EmergencyContactRecord {
+  id?: number;
+  name: string;
+  phone: string;
+  relationship?: string;
+  is_primary?: boolean;
+}
 
 export default function SafetyScreen() {
   const [safetyOn, setSafetyOn] = useState(false);
-  const [heartRateValue, setHeartRateValue] = useState(null);
   const [fallDetected, setFallDetected] = useState(false);
   const [alertTriggered, setAlertTriggered] = useState(false);
   const [shakeCount, setShakeCount] = useState(0);
+  const [iotStatus, setIotStatus] = useState<IoTDeviceStatus | null>(null);
+  const [liveBpm, setLiveBpm] = useState<number | null>(null);
+  const [bleState, setBleState] = useState<BleDetailedState>('DISCONNECTED');
+  const [error, setError] = useState<string | null>(null);
 
-  const [permission, requestPermission] = useCameraPermissions();
-  const cameraRef = useRef(null);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [measuring, setMeasuring] = useState(false);
-  const [error, setError] = useState(null);
-
-  const [contacts, setContacts] = useState([]);
+  const [contacts, setContacts] = useState<EmergencyContactRecord[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [newContact, setNewContact] = useState("");
+  const [newContactName, setNewContactName] = useState("");
 
-  const accelSubscription = useRef(null);
+  const accelSubscription = useRef<any>(null);
   const sosCooldownRef = useRef(false);
-  const shakeTimerRef = useRef(null);
+  const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Fetch real IoT device telemetry (heart rate, online status) from backend
+  const fetchIotTelemetry = useCallback(async () => {
+    try {
+      const data = await IoTService.getDeviceStatus();
+      setIotStatus(data);
+      const hr = data?.device?.lastHeartRate;
+      if (typeof hr === 'number') {
+        setLiveBpm((prev) => (prev !== null ? prev : hr));
+      }
+    } catch (e) {
+      // Ignore background fetch error
+    }
+  }, []);
+
+  // Connect & listen to direct ESP32 Bluetooth Low Energy events
+  useEffect(() => {
+    // Start BLE scan & connect on screen mount
+    bleService.startScanAndConnect();
+
+    const unsubStatus = bleService.addStatusListener((st) => {
+      setBleState(st);
+    });
+
+    const unsubEvents = bleService.addEventListener((event: BleTelemetryEvent) => {
+      console.log(`[SafetyScreen] Handling BLE Event: ${event.type}`, event);
+
+      if (event.type === 'STATUS_ONLINE') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      } else if (event.type === 'HEARTBEAT' && typeof event.bpm === 'number') {
+        setLiveBpm(event.bpm);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } else if (event.type === 'FALL_DETECTED') {
+        setFallDetected(true);
+        setAlertTriggered(true);
+        Alert.alert("⚠ Hardware Fall Detected!", "ESP32 wearable detected a physical fall event!");
+        triggerSOS();
+      } else if (event.type === 'BUTTON_SOS') {
+        Alert.alert("🚨 Physical SOS Triggered!", "ESP32 hardware emergency button was pressed!");
+        triggerSOS();
+      }
+    });
+
+    return () => {
+      unsubStatus();
+      unsubEvents();
+    };
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      let timer: ReturnType<typeof setInterval> | null = null;
+
+      const start = () => {
+        if (timer) clearInterval(timer);
+        fetchIotTelemetry();
+        timer = setInterval(fetchIotTelemetry, 10000); // 10s live telemetry refresh
+      };
+
+      const stop = () => {
+        if (timer) {
+          clearInterval(timer);
+          timer = null;
+        }
+      };
+
+      const subscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+        if (nextAppState === 'active') {
+          start();
+        } else {
+          stop();
+        }
+      });
+
+      if (AppState.currentState === 'active') {
+        start();
+      }
+
+      return () => {
+        stop();
+        subscription.remove();
+      };
+    }, [fetchIotTelemetry])
+  );
 
   useEffect(() => {
     loadContacts();
@@ -48,15 +146,12 @@ export default function SafetyScreen() {
 
   useEffect(() => {
     if (safetyOn) {
-      startHeartbeatMonitoring();
       startSensors(); // shake + fall in one listener
     } else {
-      stopHeartbeatMonitoring();
       stopSensors();
     }
 
     return () => {
-      stopHeartbeatMonitoring();
       stopSensors();
     };
   }, [safetyOn]);
@@ -123,67 +218,125 @@ export default function SafetyScreen() {
     setShakeCount(0);
   };
 
-  // --------------- Heartbeat (simulated using camera + timer) ---------------
-  const startHeartbeatMonitoring = async () => {
-    if (cameraActive || measuring) return;
-    setError(null);
+  // --------------- Real ESP32 MAX30102 Heartbeat Sensor ---------------
+  const checkHeartbeatSensor = async () => {
+    await fetchIotTelemetry();
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    if (!permission?.granted) {
-      const result = await requestPermission();
-      if (!result.granted) {
-        setError("Camera permission is required for heartbeat monitoring.");
-        return;
-      }
+    const effectiveBpm = liveBpm || bleService.latestBpm || iotStatus?.device?.lastHeartRate;
+
+    if (typeof effectiveBpm === "number" && effectiveBpm > 0) {
+      Alert.alert(
+        "💓 Live Pulse Reading",
+        `Real-time heart rate from ESP32 MAX30102 sensor: ${effectiveBpm} BPM`
+      );
+      return;
     }
 
-    setCameraActive(true);
-    setMeasuring(true);
-    setHeartRateValue(null);
-    Alert.alert("Heartbeat Check", "Place your fingertip gently on the camera lens ❤");
+    if (bleState === 'ESP32 ONLINE' || bleState === 'RECEIVING SENSOR DATA' || bleState === 'SUBSCRIBED TO SENSOR NOTIFICATIONS') {
+      Alert.alert(
+        "Waiting for Sensor Reading",
+        "ESP32 is ONLINE and subscribed to notifications. Place your finger gently on the MAX30102 pulse sensor."
+      );
+      return;
+    }
 
-    // Simulate reading after 3 seconds
-    setTimeout(() => {
-      const simulated = 72 + Math.floor(Math.random() * 10);
-      setHeartRateValue(simulated);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setMeasuring(false);
-      setCameraActive(false);
-    }, 3000);
+    if (bleState === 'CONNECTED - WAITING FOR ESP32 DATA') {
+      Alert.alert(
+        "Waiting for ESP32 Data",
+        "Connected to ESP32. Waiting for 'STATUS:ONLINE' or sensor telemetry..."
+      );
+      return;
+    }
+
+    if (bleState === 'SCANNING FOR ESP32' || bleState === 'CONNECTING' || bleState === 'ESP32 FOUND') {
+      Alert.alert(
+        "Connecting to Wearable",
+        `Current Status: ${bleState}...`
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Sensor Not Connected",
+      "ESP32 wearable is not connected. Ensure the device is powered ON and within Bluetooth range."
+    );
   };
 
-  const stopHeartbeatMonitoring = () => {
-    setCameraActive(false);
-    setMeasuring(false);
-    setHeartRateValue(null);
-  };
-
-  // --------------- AsyncStorage: Emergency Contacts ---------------
+  // --------------- Emergency Contacts: Backend MySQL + Offline Cache ---------------
   const loadContacts = async () => {
     try {
-      const saved = await AsyncStorage.getItem("emergencyContacts");
-      if (saved) setContacts(JSON.parse(saved));
+      const res = await ApiService.emergency.getContacts();
+      const backendContacts = res?.data || (Array.isArray(res) ? res : []);
+      if (Array.isArray(backendContacts) && backendContacts.length > 0) {
+        setContacts(backendContacts);
+        await AsyncStorage.setItem("emergencyContacts", JSON.stringify(backendContacts));
+        return;
+      }
     } catch (e) {
-      console.log("Error loading contacts", e);
+      console.log("Error loading contacts from API, falling back to cache:", e);
+    }
+
+    // Fallback to cache if offline or network failure
+    try {
+      const saved = await AsyncStorage.getItem("emergencyContacts");
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const normalized: EmergencyContactRecord[] = parsed.map((item: any) =>
+          typeof item === "string" ? { name: "Emergency Contact", phone: item } : item
+        );
+        setContacts(normalized);
+      }
+    } catch (e) {
+      console.log("Error loading contacts cache", e);
     }
   };
 
   const addEmergencyContact = async () => {
-    if (!newContact.trim()) return;
-    const updated = [...contacts, newContact.trim()];
-    setContacts(updated);
-    await AsyncStorage.setItem("emergencyContacts", JSON.stringify(updated));
-    setNewContact("");
-    setModalVisible(false);
+    if (!newContact.trim()) {
+      Alert.alert("Phone Required", "Please enter a valid phone number.");
+      return;
+    }
+    const phone = newContact.trim();
+    const name = newContactName.trim() || "Emergency Contact";
+
+    try {
+      const res = await ApiService.emergency.addContact({
+        name,
+        phone,
+        is_primary: contacts.length === 0,
+      });
+
+      const savedContact: EmergencyContactRecord = res?.data || { name, phone };
+      const updated = [...contacts, savedContact];
+      setContacts(updated);
+      await AsyncStorage.setItem("emergencyContacts", JSON.stringify(updated));
+      setNewContact("");
+      setNewContactName("");
+      setModalVisible(false);
+      Alert.alert("Saved", "Emergency contact saved to database.");
+    } catch (err: any) {
+      console.error("Failed to add emergency contact:", err);
+      Alert.alert("Database Error", err.response?.data?.message || "Failed to save contact to database.");
+    }
   };
 
-  const deleteContact = async (index) => {
-    const updated = contacts.filter((_, i) => i !== index);
-    setContacts(updated);
-    await AsyncStorage.setItem("emergencyContacts", JSON.stringify(updated));
+  const deleteContact = async (contact: EmergencyContactRecord, index: number) => {
+    try {
+      if (contact.id) {
+        await ApiService.emergency.deleteContact(contact.id);
+      }
+      const updated = contacts.filter((_, i) => i !== index);
+      setContacts(updated);
+      await AsyncStorage.setItem("emergencyContacts", JSON.stringify(updated));
+    } catch (err: any) {
+      console.error("Failed to delete contact from backend:", err);
+      Alert.alert("Error", err.response?.data?.message || "Failed to delete contact from database.");
+    }
   };
 
-  // --------------- SOS Logic ---------------
-  const triggerSOS = () => {
+  // --------------- SOS Logic: Persistent MySQL sos_logs + Phone Dialing ---------------
+  const triggerSOS = async () => {
     if (sosCooldownRef.current) return;
     sosCooldownRef.current = true;
     setTimeout(() => {
@@ -195,12 +348,44 @@ export default function SafetyScreen() {
       return;
     }
 
-    contacts.forEach((phone) => {
-      const cleaned = phone.replace(/\s+/g, "");
-      Linking.openURL(`tel:${cleaned}`);
+    // Direct phone dial to all registered contacts
+    contacts.forEach((c) => {
+      const cleaned = (c.phone || "").replace(/\s+/g, "");
+      if (cleaned) {
+        Linking.openURL(`tel:${cleaned}`);
+      }
     });
 
-    Alert.alert("🚨 SOS Triggered", "Calling all emergency contacts!");
+    // Record persistent SOS in MySQL database with real GPS coordinates
+    try {
+      let lat = 0;
+      let lng = 0;
+      let acc = 0;
+
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === "granted") {
+        try {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          lat = loc.coords.latitude;
+          lng = loc.coords.longitude;
+          acc = loc.coords.accuracy || 0;
+        } catch (locErr) {
+          console.warn("Could not retrieve location for SOS record:", locErr);
+        }
+      }
+
+      await ApiService.sos.triggerSOS({
+        latitude: lat,
+        longitude: lng,
+        accuracy: acc,
+        battery_level: 100,
+      });
+
+      Alert.alert("🚨 SOS Triggered", "Emergency alert recorded in database & calling contacts!");
+    } catch (apiErr: any) {
+      console.error("Failed to record SOS in database:", apiErr);
+      Alert.alert("🚨 SOS Local Triggered", "Emergency call placed, but server failed to log SOS event.");
+    }
   };
 
   // --------------- Nearby Police (Expo Location + Linking) ---------------
@@ -227,115 +412,184 @@ export default function SafetyScreen() {
     ]);
   };
 
-  const toggleSafety = (value) => {
+  const toggleSafety = (value: boolean) => {
     setSafetyOn(value);
     Alert.alert("Safety " + (value ? "ON" : "OFF"));
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.header}>🛡 Safety Center</Text>
-      <Text style={styles.subtext}>Your AI-powered personal safety companion</Text>
+    <AmbientBackground style={styles.container} accentColor="#FCE4EC">
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header */}
+        <View style={styles.headerContainer}>
+          <Text style={styles.header}>🛡️ Safety Hub</Text>
+          <Text style={styles.subtext}>
+            AI-Powered Personal Safety & Real-Time Monitoring
+          </Text>
+        </View>
 
-      <View style={styles.masterToggle}>
-        <Text style={styles.masterText}>
-          {safetyOn ? "Safety Monitoring: ON" : "Safety Monitoring: OFF"}
-        </Text>
-        <Switch value={safetyOn} onValueChange={toggleSafety} />
-      </View>
+        {/* Master Active Toggle Card */}
+        <View
+          style={[
+            styles.masterToggle,
+            safetyOn && { borderColor: "rgba(255, 128, 171, 0.6)" },
+          ]}
+        >
+          <View style={styles.toggleTextGroup}>
+            <Text style={styles.masterTitle}>Active Monitoring</Text>
+            <Text style={styles.masterSub}>
+              {safetyOn
+                ? "Sensors active: Shake & Fall Alert ON"
+                : "Tap toggle to turn on background protection"}
+            </Text>
+          </View>
+          <Switch
+            value={safetyOn}
+            onValueChange={toggleSafety}
+            trackColor={{ false: "#4a3b5c", true: "#ab47bc" }}
+            thumbColor={safetyOn ? "#ff80ab" : "#f4f3f4"}
+          />
+        </View>
 
-      {error && (
-        <Text style={{ color: "red", textAlign: "center", marginBottom: 10 }}>{error}</Text>
-      )}
+        {/* IoT Wearable Status Card */}
+        <IoTStatusCard />
 
-      <ScrollView contentContainerStyle={styles.scroll}>
+        {error && (
+          <View style={styles.errorBox}>
+            <Ionicons name="warning" size={18} color="#d50000" style={{ marginRight: 6 }} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        )}
+
+        {/* Feature Cards Grid */}
         <FeatureCard
-          icon={<Ionicons name="flash-outline" size={28} color="#fff" />}
-          title="Shake to Trigger SOS"
-          description="Shake phone 3 times strongly"
+          icon={<Ionicons name="flash" size={26} color="#fff" />}
+          title="Shake SOS Trigger"
+          description="Shake phone 3 times strongly to call emergency contacts"
         />
 
         <FeatureCard
-          icon={<Ionicons name="body-outline" size={28} color="#fff" />}
+          icon={<Ionicons name="body" size={26} color="#fff" />}
           title="Fall Detection"
-          description={fallDetected ? "Fall Detected!" : "Monitoring for falls..."}
+          description={
+            fallDetected ? "🚨 Fall Detected!" : "Accelerometer monitoring drops"
+          }
           onPress={startSensors}
         />
 
         <FeatureCard
-          icon={<MaterialCommunityIcons name="heart-pulse" size={28} color="#fff" />}
-          title="Heartbeat Monitoring"
+          icon={<MaterialCommunityIcons name="heart-pulse" size={26} color="#fff" />}
+          title="Hardware Pulse Monitoring"
           description={
-            measuring
-              ? "Measuring..."
-              : heartRateValue
-              ? `Current Heartbeat: ${heartRateValue} BPM`
-              : "Place finger on camera to measure"
+            typeof (liveBpm || bleService.latestBpm) === "number" && (liveBpm || bleService.latestBpm)! > 0
+              ? `Current Heartbeat: ${liveBpm || bleService.latestBpm} BPM`
+              : bleState === 'ESP32 ONLINE' || bleState === 'RECEIVING SENSOR DATA' || bleState === 'SUBSCRIBED TO SENSOR NOTIFICATIONS'
+              ? "Waiting for sensor... (-- BPM)"
+              : bleState === 'CONNECTED - WAITING FOR ESP32 DATA'
+              ? "CONNECTED - WAITING FOR ESP32 DATA"
+              : bleState === 'SCANNING FOR ESP32' || bleState === 'CONNECTING' || bleState === 'ESP32 FOUND'
+              ? `${bleState}...`
+              : "Sensor not connected (-- BPM)"
           }
-          onPress={startHeartbeatMonitoring}
+          onPress={checkHeartbeatSensor}
         />
 
-        {measuring && <ActivityIndicator size="large" style={{ marginTop: 15 }} />}
-
         <FeatureCard
-          icon={<Ionicons name="location-outline" size={28} color="#fff" />}
+          icon={<Ionicons name="navigate-circle" size={26} color="#fff" />}
           title="Nearby Police Stations"
-          description="Find and call nearby police stations"
+          description="Locate nearby police & send GPS coordinates"
           onPress={openNearbyPolice}
         />
 
-        <TouchableOpacity style={styles.contactsButton} onPress={() => setModalVisible(true)}>
-          <Text style={styles.contactsText}>📞 Manage Emergency Contacts</Text>
+        {/* Manage Emergency Contacts */}
+        <TouchableOpacity
+          style={styles.contactsButton}
+          activeOpacity={0.85}
+          onPress={() => setModalVisible(true)}
+        >
+          <Ionicons name="people" size={20} color="#8e24aa" style={{ marginRight: 8 }} />
+          <Text style={styles.contactsText}>Manage Emergency Contacts ({contacts.length})</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.sosButton} onPress={triggerSOS}>
-          <Text style={styles.sosText}>🚨 SOS</Text>
+        {/* Glowing SOS Alert Button */}
+        <TouchableOpacity
+          style={styles.sosButtonWrapper}
+          activeOpacity={0.85}
+          onPress={triggerSOS}
+        >
+          <LinearGradient
+            colors={["#ff1744", "#d50000", "#990000"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.sosButton}
+          >
+            <Ionicons name="alert-circle" size={32} color="#fff" style={{ marginBottom: 2 }} />
+            <Text style={styles.sosText}>TRIGGER SOS</Text>
+            <Text style={styles.sosSubText}>Calls & Sends Location</Text>
+          </LinearGradient>
         </TouchableOpacity>
       </ScrollView>
-
-      {cameraActive && permission?.granted && (
-        <CameraView
-          ref={cameraRef}
-          style={{ width: 1, height: 1 }} // hidden
-          facing="back"
-        />
-      )}
 
       {/* Contact Modal */}
       <Modal visible={modalVisible} animationType="slide" transparent>
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Emergency Contacts</Text>
+            <Text style={styles.modalSub}>
+              These contacts receive immediate calls/texts during SOS alerts.
+            </Text>
 
             <TextInput
               style={styles.modalInput}
+              placeholder="Contact Name (e.g. Mom, Doctor)"
+              placeholderTextColor="#9c88b0"
+              value={newContactName}
+              onChangeText={setNewContactName}
+            />
+
+            <TextInput
+              style={[styles.modalInput, { marginTop: 10 }]}
               placeholder="Enter phone number"
+              placeholderTextColor="#9c88b0"
               keyboardType="phone-pad"
               value={newContact}
               onChangeText={setNewContact}
             />
 
-            <TouchableOpacity style={styles.modalButton} onPress={addEmergencyContact}>
-              <Text style={styles.modalButtonText}>Save</Text>
-            </TouchableOpacity>
+            <View style={styles.modalActionRow}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalSaveBtn]}
+                onPress={addEmergencyContact}
+              >
+                <Text style={styles.modalButtonText}>Add Contact</Text>
+              </TouchableOpacity>
 
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: "#888" }]}
-              onPress={() => setModalVisible(false)}
-            >
-              <Text style={styles.modalButtonText}>Close</Text>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCloseBtn]}
+                onPress={() => setModalVisible(false)}
+              >
+                <Text style={styles.modalCloseText}>Close</Text>
+              </TouchableOpacity>
+            </View>
 
             <FlatList
               data={contacts}
-              keyExtractor={(_, index) => index.toString()}
-              renderItem={({ item, index }) => (
-                <View
-                  style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 5 }}
-                >
-                  <Text>{item}</Text>
-                  <TouchableOpacity onPress={() => deleteContact(index)}>
-                    <Text style={{ color: "red", fontWeight: "bold" }}>Delete</Text>
+              style={{ marginTop: 15, maxHeight: 180 }}
+              keyExtractor={(item: EmergencyContactRecord, index: number) => (item.id ? item.id.toString() : index.toString())}
+              renderItem={({ item, index }: { item: EmergencyContactRecord; index: number }) => (
+                <View style={styles.contactItemRow}>
+                  <View style={{ flexDirection: "row", alignItems: "center", flex: 1, marginRight: 8 }}>
+                    <Ionicons name="call" size={16} color="#8e24aa" style={{ marginRight: 8 }} />
+                    <View>
+                      {item.name ? <Text style={[styles.contactPhoneText, { fontWeight: "700" }]}>{item.name}</Text> : null}
+                      <Text style={styles.contactPhoneText}>{item.phone}</Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity onPress={() => deleteContact(item, index)}>
+                    <Ionicons name="trash" size={18} color="#e53935" />
                   </TouchableOpacity>
                 </View>
               )}
@@ -343,82 +597,286 @@ export default function SafetyScreen() {
           </View>
         </View>
       </Modal>
-    </View>
+    </AmbientBackground>
   );
 }
 
 // Reusable feature card
-function FeatureCard({ icon, title, description, onPress }) {
+function FeatureCard({
+  icon,
+  title,
+  description,
+  onPress,
+}: {
+  icon: any;
+  title: string;
+  description: string;
+  onPress?: () => void;
+}) {
   return (
-    <TouchableOpacity onPress={onPress} activeOpacity={0.8}>
-      <LinearGradient colors={["#ba68c8", "#8e24aa"]} style={styles.card}>
-        <View style={{ flexDirection: "row", alignItems: "center" }}>
-          {icon}
-          <Text style={styles.cardTitle}>{title}</Text>
+    <TouchableOpacity onPress={onPress} activeOpacity={0.88} style={styles.cardContainer}>
+      <LinearGradient
+        colors={["rgba(255, 255, 255, 0.96)", "rgba(247, 242, 250, 0.96)"]}
+        style={styles.card}
+      >
+        <View style={styles.cardHeaderRow}>
+          <View style={styles.iconWrapper}>
+            {icon}
+          </View>
+          <View style={styles.cardTextGroup}>
+            <Text style={styles.cardTitle}>{title}</Text>
+            <Text style={styles.cardDesc}>{description}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#ab47bc" />
         </View>
-        <Text style={styles.cardDesc}>{description}</Text>
       </LinearGradient>
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#f3e5f5", paddingTop: 50, paddingHorizontal: 20 },
-  header: { fontSize: 26, fontWeight: "bold", color: "#6a1b9a", textAlign: "center" },
-  subtext: { fontSize: 14, color: "#4a148c", textAlign: "center", marginBottom: 20 },
+  container: { flex: 1, backgroundColor: "#F8FAFC" },
+  scroll: {
+    paddingHorizontal: 18,
+    paddingTop: Platform.OS === "ios" ? 56 : 40,
+    paddingBottom: 40,
+  },
+  headerContainer: {
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  header: {
+    fontSize: 28,
+    fontWeight: "900",
+    color: "#1C0D2B",
+    letterSpacing: 0.5,
+  },
+  subtext: {
+    fontSize: 13,
+    color: "#6E5A80",
+    marginTop: 4,
+    textAlign: "center",
+  },
   masterToggle: {
     flexDirection: "row",
     justifyContent: "space-between",
-    backgroundColor: "#fff",
-    padding: 15,
-    borderRadius: 15,
+    alignItems: "center",
+    backgroundColor: "#ffffff",
+    padding: 18,
+    borderRadius: 22,
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: "rgba(142, 36, 170, 0.08)",
     elevation: 3,
+    shadowColor: "#0F031D",
+    shadowOpacity: 0.05,
+    shadowRadius: 14,
   },
-  masterText: { fontSize: 16, fontWeight: "600", color: "#6a1b9a" },
-  scroll: { paddingBottom: 100 },
-  card: { borderRadius: 15, padding: 15, marginBottom: 15, elevation: 4 },
-  cardTitle: { fontSize: 18, fontWeight: "bold", color: "#fff", marginLeft: 10 },
-  cardDesc: { fontSize: 14, color: "#f0f0f0", marginTop: 5 },
+  toggleTextGroup: {
+    flex: 1,
+    marginRight: 12,
+  },
+  masterTitle: {
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#1C0D2B",
+  },
+  masterSub: {
+    fontSize: 12,
+    color: "#6E5A80",
+    marginTop: 2,
+  },
+  errorBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#ffebee",
+    padding: 12,
+    borderRadius: 14,
+    marginBottom: 15,
+  },
+  errorText: {
+    color: "#d50000",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  cardContainer: {
+    marginBottom: 14,
+  },
+  card: {
+    backgroundColor: "#ffffff",
+    borderRadius: 20,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "rgba(142, 36, 170, 0.08)",
+    elevation: 2,
+    shadowColor: "#0F031D",
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+  },
+  cardHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  iconWrapper: {
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    backgroundColor: "#8e24aa",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 14,
+  },
+  cardTextGroup: {
+    flex: 1,
+  },
+  cardTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#2a0845",
+  },
+  cardDesc: {
+    fontSize: 13,
+    color: "#6b5b7b",
+    marginTop: 2,
+  },
+  measuringBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    padding: 12,
+    borderRadius: 14,
+    marginBottom: 15,
+  },
+  measuringText: {
+    color: "#ff80ab",
+    fontWeight: "700",
+    marginLeft: 10,
+    fontSize: 13,
+  },
   contactsButton: {
-    backgroundColor: "#fff",
-    padding: 15,
-    borderRadius: 15,
+    backgroundColor: "rgba(255, 255, 255, 0.96)",
+    paddingVertical: 15,
+    paddingHorizontal: 18,
+    borderRadius: 20,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "center",
     marginTop: 10,
-    elevation: 3,
+    marginBottom: 20,
+    elevation: 4,
   },
-  contactsText: { fontSize: 16, fontWeight: "600", color: "#6a1b9a" },
+  contactsText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#8e24aa",
+  },
+  sosButtonWrapper: {
+    borderRadius: 30,
+    overflow: "hidden",
+    marginTop: 10,
+    shadowColor: "#ff1744",
+    shadowOpacity: 0.5,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+  },
   sosButton: {
-    backgroundColor: "red",
-    padding: 20,
-    borderRadius: 50,
+    paddingVertical: 22,
+    paddingHorizontal: 20,
     alignItems: "center",
-    marginTop: 15,
+    borderRadius: 30,
   },
-  sosText: { color: "#fff", fontSize: 18, fontWeight: "bold" },
+  sosText: {
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "900",
+    letterSpacing: 1.2,
+  },
+  sosSubText: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 12,
+    fontWeight: "700",
+    marginTop: 2,
+  },
   modalContainer: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: "rgba(20, 5, 30, 0.65)",
+    paddingHorizontal: 20,
   },
-  modalContent: { backgroundColor: "#fff", padding: 20, borderRadius: 15, width: "90%" },
-  modalTitle: { fontSize: 18, fontWeight: "bold", marginBottom: 10 },
+  modalContent: {
+    backgroundColor: "#ffffff",
+    padding: 24,
+    borderRadius: 26,
+    width: "100%",
+    maxWidth: 340,
+    elevation: 10,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#2a0845",
+    marginBottom: 4,
+  },
+  modalSub: {
+    fontSize: 12,
+    color: "#6b5b7b",
+    marginBottom: 16,
+  },
   modalInput: {
+    backgroundColor: "#f7f2fa",
     borderWidth: 1,
-    borderColor: "#ccc",
-    padding: 10,
-    borderRadius: 10,
-    marginBottom: 10,
+    borderColor: "rgba(142, 36, 170, 0.2)",
+    padding: 14,
+    borderRadius: 14,
+    fontSize: 15,
+    color: "#2a0845",
+    marginBottom: 16,
+  },
+  modalActionRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
   },
   modalButton: {
-    backgroundColor: "#6a1b9a",
-    padding: 10,
-    borderRadius: 10,
-    marginTop: 5,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 14,
+    flex: 1,
     alignItems: "center",
   },
-  modalButtonText: { color: "#fff", fontWeight: "bold" },
+  modalSaveBtn: {
+    backgroundColor: "#8e24aa",
+    marginRight: 8,
+  },
+  modalButtonText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  modalCloseBtn: {
+    backgroundColor: "#eee5f3",
+  },
+  modalCloseText: {
+    color: "#6b5b7b",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  contactItemRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#fcf8fd",
+    padding: 12,
+    borderRadius: 14,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "rgba(142, 36, 170, 0.1)",
+  },
+  contactPhoneText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#2a0845",
+  },
 });
-

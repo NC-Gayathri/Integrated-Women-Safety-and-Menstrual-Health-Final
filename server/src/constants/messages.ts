@@ -1,0 +1,15 @@
+export const HTTP_MESSAGES = {
+  SUCCESS: 'Operation completed successfully.',
+  CREATED: 'Resource created successfully.',
+  UPDATED: 'Resource updated successfully.',
+  DELETED: 'Resource deleted successfully.',
+  NOT_FOUND: 'Resource not found.',
+  UNAUTHORIZED: 'Unauthorized access. Authentication token missing or invalid.',
+  FORBIDDEN: 'Access forbidden. Insufficient permissions.',
+  BAD_REQUEST: 'Invalid request payload or parameters.',
+  CONFLICT: 'Resource conflict. Email or identifier already exists.',
+  INTERNAL_ERROR: 'An unexpected internal server error occurred.',
+  LOGIN_SUCCESS: 'Login successful.',
+  REGISTER_SUCCESS: 'Registration successful.',
+  PASSWORD_RESET_SUCCESS: 'Password reset link generated or updated successfully.',
+};

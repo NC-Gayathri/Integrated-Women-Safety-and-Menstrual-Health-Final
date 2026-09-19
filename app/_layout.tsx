@@ -29,6 +29,7 @@ export default function RootLayout() {
         {/* Auth screens (no tabs) */}
         <Stack.Screen name="login" />
         <Stack.Screen name="signup" />
+        <Stack.Screen name="forgot-password" />
 
         {/* Tabs group (Home / Safety / Menstrual / FitMind) */}
         <Stack.Screen name="(tabs)" />

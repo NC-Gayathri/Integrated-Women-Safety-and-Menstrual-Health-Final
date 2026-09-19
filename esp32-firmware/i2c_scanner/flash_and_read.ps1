@@ -1,0 +1,60 @@
+Write-Host "=======================================================" -ForegroundColor Cyan
+Write-Host " FLASHING I2C SCANNER TO ESP32 (COM5)" -ForegroundColor Cyan
+Write-Host "=======================================================" -ForegroundColor Cyan
+
+# 1. Kill any blocking serial monitor
+taskkill /F /IM serial-monitor.exe 2>$null
+
+$esptool = "$env:LOCALAPPDATA\Arduino15\packages\esp32\tools\esptool_py\5.3.1\esptool.exe"
+$mergedBin = "c:\Users\arif\Integrated-Women-Safety-and-Menstrual-Health\WomenSafetyApp\esp32-firmware\i2c_scanner\build\i2c_scanner.ino.merged.bin"
+
+if (-not (Test-Path $esptool)) {
+    Write-Host "Error: esptool.exe not found at $esptool" -ForegroundColor Red
+    exit 1
+}
+
+if (-not (Test-Path $mergedBin)) {
+    Write-Host "Error: Binary not found at $mergedBin" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host ">>> HOLD THE 'BOOT' BUTTON ON THE ESP32 NOW <<<" -ForegroundColor Green
+Write-Host "Connecting to COM5 at 115200 baud..." -ForegroundColor Yellow
+Write-Host ""
+
+& $esptool --chip esp32 --port COM5 --baud 115200 --connect-attempts 35 write_flash 0x0 $mergedBin
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Flashing failed with exit code $LASTEXITCODE." -ForegroundColor Red
+    exit $LASTEXITCODE
+}
+
+Write-Host ""
+Write-Host "=======================================================" -ForegroundColor Green
+Write-Host " FLASH SUCCESS! Opening Serial Monitor at 115200 baud..." -ForegroundColor Green
+Write-Host "=======================================================" -ForegroundColor Green
+Write-Host ""
+
+Start-Sleep -Seconds 1
+
+$port = New-Object System.IO.Ports.SerialPort 'COM5', 115200, 'None', 8, 'One'
+$port.ReadTimeout = 1000
+$port.DtrEnable = $true
+$port.RtsEnable = $false
+
+try {
+    $port.Open()
+    Write-Host "--- Reading Serial Monitor (10 seconds) ---" -ForegroundColor Yellow
+    $end = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $end) {
+        if ($port.BytesToRead -gt 0) {
+            $line = $port.ReadExisting()
+            Write-Host -NoNewline $line
+        }
+        Start-Sleep -Milliseconds 50
+    }
+} finally {
+    if ($port.IsOpen) {
+        $port.Close()
+    }
+}

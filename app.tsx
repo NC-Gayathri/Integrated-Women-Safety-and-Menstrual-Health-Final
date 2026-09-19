@@ -6,10 +6,10 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 // ✅ screens live inside the app/ folder
 import LoginScreen from "./app/login";
 import SignupScreen from "./app/signup";
-import HomeScreen from "./app/home";
-import MenstrualScreen from "./app/menstrual";
-import SafetyScreen from "./app/safety";
-import FitMindScreen from "./app/fitmind";
+import HomeScreen from "./app/(tabs)/home";
+import MenstrualScreen from "./app/(tabs)/menstrual";
+import SafetyScreen from "./app/(tabs)/safety";
+import FitMindScreen from "./app/(tabs)/fitmind";
 
 export type RootStackParamList = {
   login: undefined;
