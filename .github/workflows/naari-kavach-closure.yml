@@ -20,6 +20,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: naari-kavach-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   firmware-contract:
     name: Firmware contract
