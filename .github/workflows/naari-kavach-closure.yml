@@ -1,9 +1,6 @@
 name: NAARI KAVACH Closure Gate
 
 on:
-  push:
-    branches:
-      - test/naari-kavach-dual-sensor-ble
   pull_request:
     branches:
       - master
@@ -54,6 +51,15 @@ jobs:
           grep -Fq 'SPO2:' "$F"
           grep -Fq 'VITALS:NO_VALID_READING' "$F"
           grep -Fq 'Wire.setTimeOut(I2C_TIMEOUT_MS)' "$F"
+          grep -Fq '#define BLE_MTU             64' "$F"
+          grep -Fq 'BLEDevice::setMTU(BLE_MTU)' "$F"
+          grep -Fq 'sendSensorHealthSnapshot();' "$F"
+
+          B="services/BleService.ts"
+          grep -Fq "await connected.requestMTU(64)" "$B"
+          grep -Fq "sUuid !== this.targetServiceUUID" "$B"
+          grep -Fq "cUuid === this.targetCharUUID && isNotifiable" "$B"
+          grep -Fq "devName.toLowerCase() === this.targetDeviceName.toLowerCase()" "$B"
 
           if grep -Eq '#include[[:space:]]*<WiFi|HTTPClient|WiFiClient' "$F"; then
             echo "Wi-Fi/HTTP code found in BLE-only firmware"
@@ -70,6 +76,7 @@ jobs:
   firmware-compile:
     name: ESP32 compile
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -107,6 +114,7 @@ jobs:
   app-static:
     name: App TypeScript and lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
