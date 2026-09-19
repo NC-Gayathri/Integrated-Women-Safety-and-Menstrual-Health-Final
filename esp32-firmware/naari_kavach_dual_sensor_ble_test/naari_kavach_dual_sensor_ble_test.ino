@@ -356,6 +356,7 @@ uint8_t opticalConsecutiveErrors = 0;
 unsigned long lastOpticalRetry = 0;
 unsigned long lastVitalsReport = 0;
 unsigned long lastSensorStatusReport = 0;
+unsigned long lastOpticalSampleAt = 0;
 
 // Real-signal processing state.
 double irDc = 0.0;
@@ -491,6 +492,7 @@ bool identifyAndConfigureOptical() {
 
   opticalReady = true;
   opticalConsecutiveErrors = 0;
+  lastOpticalSampleAt = millis();
   resetVitalsState();
 
   Serial.printf("[OPTICAL] %s ready. PART_ID=0x%02X REV=0x%02X.\n",
@@ -676,6 +678,8 @@ void updateOpticalSensor() {
   }
 
   // Bound the amount of sensor work performed per loop so SOS remains responsive.
+  int samplesReadThisLoop = 0;
+
   for (int attempt = 0; attempt < 2; ++attempt) {
     updateButtonState();
 
@@ -691,8 +695,38 @@ void updateOpticalSensor() {
 
     if (!gotSample) break;
 
+    samplesReadThisLoop++;
+    lastOpticalSampleAt = now;
     opticalConsecutiveErrors = 0;
     processOpticalSample(red, ir);
+  }
+
+  // A configured optical sensor should keep producing FIFO samples even with
+  // no finger present. If samples stop, distinguish an unplugged bus from a
+  // sensor that still ACKs but needs reconfiguration. This check is infrequent
+  // and each I2C operation is bounded by I2C_TIMEOUT_MS.
+  if (samplesReadThisLoop == 0 && now - lastOpticalSampleAt > 1500) {
+    uint8_t livePartId = 0;
+    bool busAlive = probeAddress(MAX3010X_ADDR) &&
+                    readRegister8(MAX3010X_ADDR, 0xFF, livePartId);
+
+    if (!busAlive || livePartId != opticalPartId) {
+      opticalReady = false;
+      heartRateValid = false;
+      spo2Valid = false;
+      fingerPresent = false;
+      lastOpticalRetry = now;
+      Serial.println("[OPTICAL] Sensor disconnected or I2C read failed.");
+      sendBleEvent(String("SENSOR:") + opticalChipName() + ":I2C_ERROR");
+      return;
+    }
+
+    Serial.println("[OPTICAL] Device responds but FIFO stalled; reconfiguring.");
+    if (!identifyAndConfigureOptical()) {
+      opticalReady = false;
+      lastOpticalRetry = now;
+      return;
+    }
   }
 
   if (now - lastVitalsReport >= VITALS_REPORT_INTERVAL_MS) {
