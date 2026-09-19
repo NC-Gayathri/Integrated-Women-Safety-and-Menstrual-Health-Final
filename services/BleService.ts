@@ -34,8 +34,19 @@ export type BleDetailedState =
   | 'ERROR';
 
 export interface BleTelemetryEvent {
-  type: 'STATUS_ONLINE' | 'HEARTBEAT' | 'FALL_DETECTED' | 'BUTTON_SOS' | 'RAW';
+  type:
+    | 'STATUS_ONLINE'
+    | 'HEARTBEAT'
+    | 'SPO2'
+    | 'SENSOR_STATUS'
+    | 'VITALS_STATUS'
+    | 'FALL_DETECTED'
+    | 'BUTTON_SOS'
+    | 'RAW';
   bpm?: number;
+  spo2?: number;
+  sensorStatus?: string;
+  vitalsStatus?: string;
   fallDetected?: boolean;
   rawPayload: string;
   timestamp: number;
@@ -50,6 +61,7 @@ export interface BleDiagnosticInfo {
   notificationsSubscribed: boolean;
   lastRawMessage: string;
   lastHeartbeat: number | null;
+  lastSpO2: number | null;
   lastSensorEvent: string;
   totalPacketsReceived: number;
   isNativeBleAvailable: boolean;
@@ -115,6 +127,7 @@ class BleService {
     notificationsSubscribed: false,
     lastRawMessage: 'None',
     lastHeartbeat: null,
+    lastSpO2: null,
     lastSensorEvent: 'None',
     totalPacketsReceived: 0,
     isNativeBleAvailable: !isExpoGo && !!NativeModules?.BleClientManager,
@@ -122,6 +135,7 @@ class BleService {
 
   public isEsp32Online: boolean = false;
   public latestBpm: number | null = null;
+  public latestSpO2: number | null = null;
   public lastFallDetected: boolean = false;
   public lastEventTime: number = 0;
   public readonly isBleSupported: boolean = !isExpoGo && !!NativeModules?.BleClientManager;
@@ -467,7 +481,65 @@ class BleService {
       return;
     }
 
-    // 4. Hardware Fall Detected: "FALL_DETECTED"
+    // 4. Real SpO2 reading: "SPO2:<percent>"
+    if (text.toUpperCase().startsWith('SPO2:')) {
+      const parts = text.split(':');
+      const spo2Number = parts.length > 1 ? parseInt(parts[1].trim(), 10) : NaN;
+
+      if (!isNaN(spo2Number) && spo2Number >= 70 && spo2Number <= 100) {
+        this.latestSpO2 = spo2Number;
+        this.diagnostics.lastSpO2 = spo2Number;
+        this.diagnostics.lastSensorEvent = `SPO2:${spo2Number}`;
+        this.emitDiagnostics();
+        console.log(`[BLE EVENT] SpO2 received: ${spo2Number}%`);
+        this.updateStatus('RECEIVING SENSOR DATA', `SpO2: ${spo2Number}%`);
+        this.dispatchTelemetry({
+          type: 'SPO2',
+          spo2: spo2Number,
+          rawPayload: text,
+          timestamp: now,
+        });
+      } else {
+        console.warn(`[BLE] Ignored invalid SpO2 value: '${parts[1]}' in payload '${text}'`);
+      }
+      return;
+    }
+
+    // 5. Explicit sensor health/status packets.
+    if (text.toUpperCase().startsWith('SENSOR:')) {
+      this.diagnostics.lastSensorEvent = text;
+      this.emitDiagnostics();
+      this.dispatchTelemetry({
+        type: 'SENSOR_STATUS',
+        sensorStatus: text,
+        rawPayload: text,
+        timestamp: now,
+      });
+      return;
+    }
+
+    // 6. Vitals validity/acquisition state. These are deliberately not
+    // converted into numeric readings.
+    if (text.toUpperCase().startsWith('VITALS:')) {
+      if (text.toUpperCase().includes('NO_VALID_READING')) {
+        this.latestBpm = null;
+        this.latestSpO2 = null;
+        this.diagnostics.lastHeartbeat = null;
+        this.diagnostics.lastSpO2 = null;
+      }
+
+      this.diagnostics.lastSensorEvent = text;
+      this.emitDiagnostics();
+      this.dispatchTelemetry({
+        type: 'VITALS_STATUS',
+        vitalsStatus: text,
+        rawPayload: text,
+        timestamp: now,
+      });
+      return;
+    }
+
+    // 7. Hardware Fall Detected: "FALL_DETECTED"
     if (text === 'FALL_DETECTED' || text.toUpperCase() === 'FALL_DETECTED') {
       console.log(`[BLE DECODED] ${text}`);
       console.log('[BLE EVENT] Hardware fall detected');
@@ -484,7 +556,7 @@ class BleService {
       return;
     }
 
-    // Fallback: If numeric string only (e.g. "72")
+    // Fallback: If numeric string only (legacy heartbeat payload, e.g. "72")
     if (/^\d+$/.test(text)) {
       const bpmNumber = parseInt(text, 10);
       if (bpmNumber >= 30 && bpmNumber <= 230) {
@@ -530,6 +602,12 @@ class BleService {
 
   private async syncBackend(event: BleTelemetryEvent): Promise<void> {
     try {
+      // Current backend schema has no SpO2/sensor-health column. Do not
+      // mislabel those packets as heartbeat events.
+      if (event.type === 'SPO2' || event.type === 'SENSOR_STATUS' || event.type === 'VITALS_STATUS') {
+        return;
+      }
+
       const eventTypeMap: Record<string, string> = {
         STATUS_ONLINE: 'STATUS_HEARTBEAT',
         BUTTON_SOS: 'BUTTON_SOS',
