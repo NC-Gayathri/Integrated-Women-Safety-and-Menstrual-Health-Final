@@ -165,7 +165,10 @@ Do not merge this branch to \`master\` until all mandatory evidence is captured:
 - Test B PASS
 - Test C PASS
 - MPU6050 detection PASS
-- mobile BLE subscription PASS
+- exact-name BLE discovery PASS
+- exact service UUID discovery PASS
+- exact characteristic UUID subscription PASS
+- sensor-health packet reception after subscription PASS
 - mobile HR display PASS
 - mobile SpO2 display PASS
 - no Wi-Fi/HTTP in test firmware
