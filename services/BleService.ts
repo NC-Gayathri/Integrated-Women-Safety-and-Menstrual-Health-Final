@@ -507,6 +507,21 @@ class BleService {
 
     // 5. Explicit sensor health/status packets.
     if (text.toUpperCase().startsWith('SENSOR:')) {
+      const upper = text.toUpperCase();
+      const opticalFault =
+        (upper.includes('MAX30100') || upper.includes('MAX30102') || upper.includes('MAX3010X')) &&
+        (upper.includes('I2C_ERROR') ||
+          upper.includes('NOT_READY') ||
+          upper.includes('CONFIG_ERROR') ||
+          upper.includes('UNKNOWN_PART'));
+
+      if (opticalFault) {
+        this.latestBpm = null;
+        this.latestSpO2 = null;
+        this.diagnostics.lastHeartbeat = null;
+        this.diagnostics.lastSpO2 = null;
+      }
+
       this.diagnostics.lastSensorEvent = text;
       this.emitDiagnostics();
       this.dispatchTelemetry({
