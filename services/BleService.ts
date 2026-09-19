@@ -12,9 +12,11 @@ const isExpoGo =
 let BleManagerClass: any = null;
 if (!isExpoGo) {
   try {
+    // Conditional CommonJS load is intentional so Expo Go does not eagerly touch the native module.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const BleModule = require('react-native-ble-plx');
     BleManagerClass = BleModule.BleManager;
-  } catch (e) {
+  } catch {
     console.log('[BLE] react-native-ble-plx native module not linked in current JS environment.');
   }
 }
@@ -34,8 +36,19 @@ export type BleDetailedState =
   | 'ERROR';
 
 export interface BleTelemetryEvent {
-  type: 'STATUS_ONLINE' | 'HEARTBEAT' | 'FALL_DETECTED' | 'BUTTON_SOS' | 'RAW';
+  type:
+    | 'STATUS_ONLINE'
+    | 'HEARTBEAT'
+    | 'SPO2'
+    | 'SENSOR_STATUS'
+    | 'VITALS_STATUS'
+    | 'FALL_DETECTED'
+    | 'BUTTON_SOS'
+    | 'RAW';
   bpm?: number;
+  spo2?: number;
+  sensorStatus?: string;
+  vitalsStatus?: string;
   fallDetected?: boolean;
   rawPayload: string;
   timestamp: number;
@@ -50,6 +63,7 @@ export interface BleDiagnosticInfo {
   notificationsSubscribed: boolean;
   lastRawMessage: string;
   lastHeartbeat: number | null;
+  lastSpO2: number | null;
   lastSensorEvent: string;
   totalPacketsReceived: number;
   isNativeBleAvailable: boolean;
@@ -84,7 +98,7 @@ function decodeBase64ToUtf8(base64: string): string {
     }
 
     return output.trim();
-  } catch (e) {
+  } catch {
     return base64;
   }
 }
@@ -115,6 +129,7 @@ class BleService {
     notificationsSubscribed: false,
     lastRawMessage: 'None',
     lastHeartbeat: null,
+    lastSpO2: null,
     lastSensorEvent: 'None',
     totalPacketsReceived: 0,
     isNativeBleAvailable: !isExpoGo && !!NativeModules?.BleClientManager,
@@ -122,6 +137,7 @@ class BleService {
 
   public isEsp32Online: boolean = false;
   public latestBpm: number | null = null;
+  public latestSpO2: number | null = null;
   public lastFallDetected: boolean = false;
   public lastEventTime: number = 0;
   public readonly isBleSupported: boolean = !isExpoGo && !!NativeModules?.BleClientManager;
@@ -236,8 +252,7 @@ class BleService {
             const devName = (device.name || device.localName || '').trim();
 
             // Match advertised device name NAARI_KAVACH primarily without relying on MAC
-            const isNameMatch = devName.toLowerCase() === this.targetDeviceName.toLowerCase() ||
-              devName.toLowerCase().includes(this.targetDeviceName.toLowerCase());
+            const isNameMatch = devName.toLowerCase() === this.targetDeviceName.toLowerCase();
 
             if (isNameMatch) {
               console.log(`[BLE] Device found: ${devName} [${device.id}] (RSSI: ${device.rssi} dBm)`);
@@ -264,7 +279,7 @@ class BleService {
     if (this.manager) {
       try {
         this.manager.stopDeviceScan();
-      } catch (e) {}
+      } catch {}
     }
   }
 
@@ -275,6 +290,19 @@ class BleService {
       console.log('[BLE] Connecting...');
 
       const connected = await device.connect({ autoConnect: false, timeout: 15000 });
+
+      // Negotiate an MTU large enough for the longest sensor-health packets.
+      // Core SOS/HR/SpO2 packets are already <= 20 bytes, so failure here is
+      // non-fatal and older devices can still use the essential path.
+      if (Platform.OS === 'android' && typeof connected.requestMTU === 'function') {
+        try {
+          await connected.requestMTU(64);
+          console.log('[BLE] Requested 64-byte MTU for complete diagnostic notifications.');
+        } catch (mtuError: any) {
+          console.warn('[BLE] MTU negotiation failed; continuing with essential short packets:', mtuError?.message || mtuError);
+        }
+      }
+
       this.connectedDevice = connected;
       console.log('[BLE] Connected');
 
@@ -293,7 +321,9 @@ class BleService {
         this.scheduleReconnect(4000);
       });
 
-      // Discover GATT services & characteristics
+      // Discover the exact locked GATT service/characteristic contract.
+      // Do not fall back to arbitrary notify characteristics: a mismatch must
+      // be visible during integration instead of silently binding the wrong endpoint.
       console.log('[BLE] Discovering services and characteristics');
       const discovered = await connected.discoverAllServicesAndCharacteristics();
       const services = await discovered.services();
@@ -302,54 +332,28 @@ class BleService {
 
       for (const service of services) {
         const sUuid = service.uuid.toLowerCase();
-        if (sUuid === this.targetServiceUUID || sUuid.includes(this.targetServiceUUID)) {
-          console.log(`[BLE] Service found:\n${this.targetServiceUUID}`);
-          this.diagnostics.serviceFound = true;
-          this.emitDiagnostics();
-        }
+        if (sUuid !== this.targetServiceUUID) continue;
+
+        console.log(`[BLE] Exact service found: ${this.targetServiceUUID}`);
+        this.diagnostics.serviceFound = true;
+        this.emitDiagnostics();
 
         const characteristics = await service.characteristics();
         for (const char of characteristics) {
           const cUuid = char.uuid.toLowerCase();
-          const isNotifiable = char.isNotifiable || char.isIndicatable;
+          const isNotifiable = !!(char.isNotifiable || char.isIndicatable);
 
-          // Match exact target Characteristic UUID
-          if (
-            cUuid === this.targetCharUUID ||
-            this.targetCharUUID.includes(cUuid) ||
-            cUuid.includes(this.targetCharUUID)
-          ) {
-            console.log(`[BLE] Characteristic found:\n${this.targetCharUUID}`);
+          if (cUuid === this.targetCharUUID && isNotifiable) {
+            console.log(`[BLE] Exact notify characteristic found: ${this.targetCharUUID}`);
             this.diagnostics.characteristicFound = true;
             this.emitDiagnostics();
             this.subscribeToCharacteristic(char);
             targetSubscribed = true;
-          } else if (sUuid === this.targetServiceUUID && isNotifiable && !targetSubscribed) {
-            console.log(`[BLE] Subscribing to service characteristic: ${char.uuid}`);
-            this.diagnostics.characteristicFound = true;
-            this.emitDiagnostics();
-            this.subscribeToCharacteristic(char);
-            targetSubscribed = true;
+            break;
           }
         }
-      }
 
-      if (!targetSubscribed) {
-        console.warn('[BLE] Characteristic not explicitly found, checking all notify characteristics...');
-        for (const service of services) {
-          const characteristics = await service.characteristics();
-          for (const char of characteristics) {
-            if (char.isNotifiable || char.isIndicatable) {
-              console.log(`[BLE] Fallback characteristic found: ${char.uuid}`);
-              this.diagnostics.characteristicFound = true;
-              this.emitDiagnostics();
-              this.subscribeToCharacteristic(char);
-              targetSubscribed = true;
-              break;
-            }
-          }
-          if (targetSubscribed) break;
-        }
+        break;
       }
 
       if (targetSubscribed) {
@@ -358,7 +362,16 @@ class BleService {
         this.emitDiagnostics();
         this.updateStatus('SUBSCRIBED TO SENSOR NOTIFICATIONS');
       } else {
-        this.updateStatus('ERROR', 'Could not subscribe to notification characteristic.');
+        const reason = this.diagnostics.serviceFound
+          ? 'Expected BLE notify characteristic UUID was not found/notifiable.'
+          : 'Expected BLE service UUID was not found.';
+        console.error(`[BLE] Contract mismatch: ${reason}`);
+        this.updateStatus('ERROR', reason);
+        try {
+          await connected.cancelConnection();
+        } catch {}
+        this.cleanupConnection();
+        this.scheduleReconnect(5000);
       }
     } catch (err: any) {
       console.error('[BLE] Connection error:', err);
@@ -467,7 +480,80 @@ class BleService {
       return;
     }
 
-    // 4. Hardware Fall Detected: "FALL_DETECTED"
+    // 4. Real SpO2 reading: "SPO2:<percent>"
+    if (text.toUpperCase().startsWith('SPO2:')) {
+      const parts = text.split(':');
+      const spo2Number = parts.length > 1 ? parseInt(parts[1].trim(), 10) : NaN;
+
+      if (!isNaN(spo2Number) && spo2Number >= 70 && spo2Number <= 100) {
+        this.latestSpO2 = spo2Number;
+        this.diagnostics.lastSpO2 = spo2Number;
+        this.diagnostics.lastSensorEvent = `SPO2:${spo2Number}`;
+        this.emitDiagnostics();
+        console.log(`[BLE EVENT] SpO2 received: ${spo2Number}%`);
+        this.updateStatus('RECEIVING SENSOR DATA', `SpO2: ${spo2Number}%`);
+        this.dispatchTelemetry({
+          type: 'SPO2',
+          spo2: spo2Number,
+          rawPayload: text,
+          timestamp: now,
+        });
+      } else {
+        console.warn(`[BLE] Ignored invalid SpO2 value: '${parts[1]}' in payload '${text}'`);
+      }
+      return;
+    }
+
+    // 5. Explicit sensor health/status packets.
+    if (text.toUpperCase().startsWith('SENSOR:')) {
+      const upper = text.toUpperCase();
+      const opticalFault =
+        (upper.includes('MAX30100') || upper.includes('MAX30102') || upper.includes('MAX3010X')) &&
+        (upper.includes('I2C_ERROR') ||
+          upper.includes('NOT_READY') ||
+          upper.includes('CONFIG_ERROR') ||
+          upper.includes('UNKNOWN_PART'));
+
+      if (opticalFault) {
+        this.latestBpm = null;
+        this.latestSpO2 = null;
+        this.diagnostics.lastHeartbeat = null;
+        this.diagnostics.lastSpO2 = null;
+      }
+
+      this.diagnostics.lastSensorEvent = text;
+      this.emitDiagnostics();
+      this.dispatchTelemetry({
+        type: 'SENSOR_STATUS',
+        sensorStatus: text,
+        rawPayload: text,
+        timestamp: now,
+      });
+      return;
+    }
+
+    // 6. Vitals validity/acquisition state. These are deliberately not
+    // converted into numeric readings.
+    if (text.toUpperCase().startsWith('VITALS:')) {
+      if (text.toUpperCase().includes('NO_VALID_READING')) {
+        this.latestBpm = null;
+        this.latestSpO2 = null;
+        this.diagnostics.lastHeartbeat = null;
+        this.diagnostics.lastSpO2 = null;
+      }
+
+      this.diagnostics.lastSensorEvent = text;
+      this.emitDiagnostics();
+      this.dispatchTelemetry({
+        type: 'VITALS_STATUS',
+        vitalsStatus: text,
+        rawPayload: text,
+        timestamp: now,
+      });
+      return;
+    }
+
+    // 7. Hardware Fall Detected: "FALL_DETECTED"
     if (text === 'FALL_DETECTED' || text.toUpperCase() === 'FALL_DETECTED') {
       console.log(`[BLE DECODED] ${text}`);
       console.log('[BLE EVENT] Hardware fall detected');
@@ -484,7 +570,7 @@ class BleService {
       return;
     }
 
-    // Fallback: If numeric string only (e.g. "72")
+    // Fallback: If numeric string only (legacy heartbeat payload, e.g. "72")
     if (/^\d+$/.test(text)) {
       const bpmNumber = parseInt(text, 10);
       if (bpmNumber >= 30 && bpmNumber <= 230) {
@@ -530,6 +616,12 @@ class BleService {
 
   private async syncBackend(event: BleTelemetryEvent): Promise<void> {
     try {
+      // Current backend schema has no SpO2/sensor-health column. Do not
+      // mislabel those packets as heartbeat events.
+      if (event.type === 'SPO2' || event.type === 'SENSOR_STATUS' || event.type === 'VITALS_STATUS') {
+        return;
+      }
+
       const eventTypeMap: Record<string, string> = {
         STATUS_ONLINE: 'STATUS_HEARTBEAT',
         BUTTON_SOS: 'BUTTON_SOS',
@@ -547,7 +639,7 @@ class BleService {
         heartRate: event.bpm || this.latestBpm || undefined,
         fallDetected: event.type === 'FALL_DETECTED',
       });
-    } catch (e) {
+    } catch {
       // Backend may be offline; direct local BLE handling still succeeds
     }
   }
@@ -582,7 +674,7 @@ class BleService {
     this.diagnosticListeners.forEach((listener) => {
       try {
         listener({ ...this.diagnostics });
-      } catch (err) {}
+      } catch {}
     });
   }
 
@@ -591,7 +683,7 @@ class BleService {
     this.statusListeners.forEach((listener) => {
       try {
         listener(state, details);
-      } catch (err) {}
+      } catch {}
     });
   }
 
@@ -603,7 +695,7 @@ class BleService {
     if (this.charSubscription) {
       try {
         this.charSubscription.remove();
-      } catch (e) {}
+      } catch {}
       this.charSubscription = null;
     }
     this.connectedDevice = null;
@@ -624,7 +716,7 @@ class BleService {
     if (this.connectedDevice) {
       try {
         await this.connectedDevice.cancelConnection();
-      } catch (e) {}
+      } catch {}
     }
     this.cleanupConnection();
     this.isEsp32Online = false;
