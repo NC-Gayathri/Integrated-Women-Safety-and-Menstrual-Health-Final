@@ -12,9 +12,11 @@ const isExpoGo =
 let BleManagerClass: any = null;
 if (!isExpoGo) {
   try {
+    // Conditional CommonJS load is intentional so Expo Go does not eagerly touch the native module.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const BleModule = require('react-native-ble-plx');
     BleManagerClass = BleModule.BleManager;
-  } catch (e) {
+  } catch {
     console.log('[BLE] react-native-ble-plx native module not linked in current JS environment.');
   }
 }
@@ -96,7 +98,7 @@ function decodeBase64ToUtf8(base64: string): string {
     }
 
     return output.trim();
-  } catch (e) {
+  } catch {
     return base64;
   }
 }
@@ -189,7 +191,7 @@ class BleService {
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       }
-    } catch (err) {
+    } catch {
       console.warn('[BLE] Error requesting Android permissions:', err);
       return false;
     }
@@ -277,7 +279,7 @@ class BleService {
     if (this.manager) {
       try {
         this.manager.stopDeviceScan();
-      } catch (e) {}
+      } catch {}
     }
   }
 
@@ -367,7 +369,7 @@ class BleService {
         this.updateStatus('ERROR', reason);
         try {
           await connected.cancelConnection();
-        } catch (disconnectError) {}
+        } catch {}
         this.cleanupConnection();
         this.scheduleReconnect(5000);
       }
@@ -405,7 +407,7 @@ class BleService {
           this.handleIncomingMessage(decodedText);
         }
       });
-    } catch (e) {
+    } catch {
       console.error(`[BLE] Failed to register monitor for ${characteristic?.uuid}:`, e);
     }
   }
@@ -603,7 +605,7 @@ class BleService {
     this.eventListeners.forEach((listener) => {
       try {
         listener(event);
-      } catch (err) {
+      } catch {
         console.error('[BLE] Listener error:', err);
       }
     });
@@ -637,7 +639,7 @@ class BleService {
         heartRate: event.bpm || this.latestBpm || undefined,
         fallDetected: event.type === 'FALL_DETECTED',
       });
-    } catch (e) {
+    } catch {
       // Backend may be offline; direct local BLE handling still succeeds
     }
   }
@@ -672,7 +674,7 @@ class BleService {
     this.diagnosticListeners.forEach((listener) => {
       try {
         listener({ ...this.diagnostics });
-      } catch (err) {}
+      } catch {}
     });
   }
 
@@ -681,7 +683,7 @@ class BleService {
     this.statusListeners.forEach((listener) => {
       try {
         listener(state, details);
-      } catch (err) {}
+      } catch {}
     });
   }
 
@@ -693,7 +695,7 @@ class BleService {
     if (this.charSubscription) {
       try {
         this.charSubscription.remove();
-      } catch (e) {}
+      } catch {}
       this.charSubscription = null;
     }
     this.connectedDevice = null;
@@ -714,7 +716,7 @@ class BleService {
     if (this.connectedDevice) {
       try {
         await this.connectedDevice.cancelConnection();
-      } catch (e) {}
+      } catch {}
     }
     this.cleanupConnection();
     this.isEsp32Online = false;
