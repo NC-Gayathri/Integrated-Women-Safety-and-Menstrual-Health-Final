@@ -63,10 +63,6 @@ export default function SafetyScreen() {
     try {
       const data = await IoTService.getDeviceStatus();
       setIotStatus(data);
-      const hr = data?.device?.lastHeartRate;
-      if (typeof hr === 'number') {
-        setLiveBpm((prev) => (prev !== null ? prev : hr));
-      }
     } catch (e) {
       // Ignore background fetch error
     }
@@ -93,6 +89,19 @@ export default function SafetyScreen() {
         setLiveSpo2(event.spo2);
       } else if (event.type === 'SENSOR_STATUS' && event.sensorStatus) {
         setHardwareSensorStatus(event.sensorStatus);
+
+        const upper = event.sensorStatus.toUpperCase();
+        const opticalFault =
+          (upper.includes('MAX30100') || upper.includes('MAX30102') || upper.includes('MAX3010X')) &&
+          (upper.includes('I2C_ERROR') ||
+            upper.includes('NOT_READY') ||
+            upper.includes('CONFIG_ERROR') ||
+            upper.includes('UNKNOWN_PART'));
+
+        if (opticalFault) {
+          setLiveBpm(null);
+          setLiveSpo2(null);
+        }
       } else if (event.type === 'VITALS_STATUS' && event.vitalsStatus) {
         if (event.vitalsStatus.toUpperCase().includes('NO_VALID_READING')) {
           setLiveBpm(null);
@@ -234,7 +243,7 @@ export default function SafetyScreen() {
     await fetchIotTelemetry();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
-    const effectiveBpm = liveBpm ?? bleService.latestBpm ?? iotStatus?.device?.lastHeartRate ?? null;
+    const effectiveBpm = liveBpm ?? bleService.latestBpm ?? null;
     const effectiveSpo2 = liveSpo2 ?? bleService.latestSpO2 ?? null;
 
     if (
