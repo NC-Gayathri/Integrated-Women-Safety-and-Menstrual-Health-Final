@@ -751,6 +751,18 @@ void updateOpticalSensor() {
   }
 }
 
+void sendSensorHealthSnapshot() {
+  sendBleEvent(mpuReady ? "SENSOR:MPU6050:READY" : "SENSOR:MPU6050:NOT_READY");
+
+  if (opticalReady) {
+    sendBleEvent(String("SENSOR:") + opticalChipName() + ":READY");
+  } else if (opticalChip == OPTICAL_UNKNOWN) {
+    sendBleEvent("SENSOR:MAX3010X:UNKNOWN_PART");
+  } else {
+    sendBleEvent("SENSOR:MAX3010X:NOT_READY");
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Setup / loop
 // -----------------------------------------------------------------------------
@@ -814,6 +826,7 @@ void loop() {
   if (deviceConnected && !oldDeviceConnected) {
     oldDeviceConnected = true;
     sendBleEvent("STATUS:ONLINE");
+    sendSensorHealthSnapshot();
   } else if (!deviceConnected && oldDeviceConnected) {
     oldDeviceConnected = false;
     pServer->startAdvertising();
