@@ -510,13 +510,6 @@ export default function SafetyScreen() {
         {/* IoT Wearable Status Card */}
         <IoTStatusCard />
 
-        {error && (
-          <View style={styles.errorBox}>
-            <Ionicons name="warning" size={18} color="#d50000" style={{ marginRight: 6 }} />
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        )}
-
         {/* Feature Cards Grid */}
         <FeatureCard
           icon={<Ionicons name="flash" size={26} color="#fff" />}
