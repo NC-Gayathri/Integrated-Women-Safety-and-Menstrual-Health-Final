@@ -1,10 +1,12 @@
 # NAARI KAVACH Dual-Sensor BLE — Formal Hardware Test Plan
 
-This test plan applies only to the isolated branch:
+The original integration branch was merged into `master` in PR #2. Run these
+physical acceptance checks against the current default branch (`master`) and
+record the exact commit flashed. PR #3 continues the optical READY repair; see
+[its repair guide](NAARI_KAVACH_OPTICAL_READY_REPAIR.md).
 
-\`test/naari-kavach-dual-sensor-ble\`
-
-Production firmware on \`master\` must not be overwritten until every mandatory gate below passes.
+These remain physical acceptance gates. A code merge or passing CI does not
+mark any unobserved hardware check as passed.
 
 ## 1. Locked hardware
 
@@ -15,7 +17,7 @@ Production firmware on \`master\` must not be overwritten until every mandatory 
 ### SOS button
 - One terminal: GPIO 4
 - Other terminal: GND
-- Software mode: \`INPUT_PULLUP\`
+- Software mode: `INPUT_PULLUP`
 - Required behavior: three presses within 1.8 seconds
 
 ### GY-521 / MPU-6050
@@ -44,15 +46,15 @@ The firmware refuses to invent a sensor type when PART_ID is unknown.
 
 ## 2. Locked BLE contract
 
-- Device name: \`NAARI_KAVACH\`
-- Service UUID: \`12345678-1234-1234-1234-1234567890ab\`
-- Notify characteristic UUID: \`87654321-4321-4321-4321-ba0987654321\`
+- Device name: `NAARI_KAVACH`
+- Service UUID: `12345678-1234-1234-1234-1234567890ab`
+- Notify characteristic UUID: `87654321-4321-4321-4321-ba0987654321`
 
 No Wi-Fi and no HTTP are allowed in the test firmware.
 
 ## 3. Firmware to flash
 
-\`esp32-firmware/naari_kavach_dual_sensor_ble_test/naari_kavach_dual_sensor_ble_test.ino\`
+`esp32-firmware/naari_kavach_dual_sensor_ble_test/naari_kavach_dual_sensor_ble_test.ino`
 
 Arduino IDE:
 1. Select DOIT ESP32 DEVKIT V1.
@@ -64,13 +66,14 @@ Arduino IDE:
 ## 4. Boot acceptance
 
 Expected boot evidence must include:
-- BLE name \`NAARI_KAVACH\`
+- BLE name `NAARI_KAVACH`
 - I2C SDA=21, SCL=22, 100000 Hz
 - Wi-Fi disabled
 - HTTP disabled
 - MPU6050 ready at 0x68 or 0x69, OR a non-fatal "not detected" message
 - Optical sensor identified as MAX30100 or MAX30102 from PART_ID, OR a non-fatal explicit error
-- Final READY message
+- Final BLE/SOS startup message; this alone does **not** prove optical readiness
+- Separate `SENSOR:MAX30100:READY` or `SENSOR:MAX30102:READY` after verified configuration
 
 Failure of either sensor must never prevent BLE/SOS startup.
 
@@ -78,7 +81,7 @@ Failure of either sensor must never prevent BLE/SOS startup.
 
 Record the exact line:
 
-\`[OPTICAL] <chip> ready. PART_ID=0x.. REV=0x..\`
+`[OPTICAL] <chip> ready. PART_ID=0x.. REV=0x..`
 
 Pass:
 - 0x11 identifies MAX30100, or
@@ -91,11 +94,11 @@ Do not pass this gate based only on the product listing.
 With a finger placed steadily over the optical window:
 
 Expected BLE/Serial messages eventually include:
-- \`HEART_RATE:<BPM>\`
-- \`SPO2:<percent>\`
+- `HEART_RATE:<BPM>`
+- `SPO2:<percent>`
 
 With no finger:
-- \`VITALS:NO_VALID_READING\` or \`VITALS:ACQUIRING\`
+- `VITALS:NO_VALID_READING` or `VITALS:ACQUIRING`
 - no fabricated fixed/random BPM or SpO2 values
 
 SpO2 is a prototype estimate from real red/IR samples and is not a medical diagnosis.
@@ -110,7 +113,7 @@ SpO2 is a prototype estimate from real red/IR samples and is not a medical diagn
 PASS only if:
 - firmware remains alive,
 - BLE remains available,
-- \`SOS\` is emitted.
+- `SOS` is emitted.
 
 ### Test B — optical sensor disconnected while running
 1. Boot with MAX3010x working.
@@ -122,7 +125,7 @@ PASS only if:
 - firmware reports sensor I2C error/not-ready,
 - firmware does not freeze,
 - no fake vitals appear,
-- \`SOS\` still emits.
+- `SOS` still emits.
 
 ### Test C — SOS while optical sampling is active
 1. Place finger on optical sensor.
@@ -143,17 +146,18 @@ A deliberate fall-detection test should be performed on the electronics safely w
 ## 9. BLE/mobile gate
 
 The mobile app must:
-- discover \`NAARI_KAVACH\`,
+- discover `NAARI_KAVACH`,
 - subscribe to the preserved characteristic,
-- display real HR when \`HEART_RATE:<BPM>\` arrives,
-- display real SpO2 estimate when \`SPO2:<percent>\` arrives,
-- clear stale vitals on \`VITALS:NO_VALID_READING\`,
-- show sensor unavailable state for \`SENSOR:*:I2C_ERROR\`, \`NOT_READY\`, \`CONFIG_ERROR\`, or \`UNKNOWN_PART\`,
+- display real HR when `HEART_RATE:<BPM>` arrives,
+- display real SpO2 estimate when `SPO2:<percent>` arrives,
+- clear stale vitals on `VITALS:NO_VALID_READING`,
+- show sensor unavailable state for `SENSOR:*:I2C_ERROR`, `NOT_READY`, `CONFIG_ERROR`, or `UNKNOWN_PART`,
 - preserve BUTTON_SOS and FALL_DETECTED handling.
 
 ## 10. Formal closure evidence
 
-Do not merge this branch to \`master\` until all mandatory evidence is captured:
+The code has an independently auditable merge/CI record. Do not declare the
+physical integration closed until all mandatory evidence below is captured:
 
 - Arduino compile success
 - boot Serial log

@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+"""Run the actual BLE integration sketch against a deterministic I2C boundary.
+
+These host tests are software regression evidence, not physical sensor evidence.
+The independent ESP32 compile job validates Arduino preprocessing and the SDK.
+"""
+from pathlib import Path
+import os
+import subprocess
+import tempfile
+
+ROOT = Path(__file__).resolve().parents[1]
+CASES = [
+    'ready_100', 'ready_102', 'deferred_read_failure', 'transient_write',
+    'absent', 'unreadable_identity', 'unknown', 'reset_timeout_100',
+    'reset_timeout_102', 'write_failure_100', 'write_failure_102',
+    'readback_failure_100', 'readback_failure_102', 'mismatch_100', 'mismatch_102',
+    'shutdown_100', 'shutdown_102', 'burst_deferred_read', 'fifo_partial_read',
+    'sos_during_init', 'disconnect_recovery', 'no_finger',
+    'fifo_error_consumed_100', 'fifo_error_consumed_102',
+]
+with tempfile.TemporaryDirectory(prefix='naari-optical-') as temporary:
+    executable = str(Path(temporary) / 'readiness-test')
+    subprocess.run([
+        os.environ.get('CXX', 'g++'), '-std=c++17', '-Wall', '-Wextra', '-Werror',
+        '-Wno-unused-parameter', '-Wno-unused-variable', '-fsanitize=undefined', '-fno-sanitize-recover=all',
+        '-I', str(ROOT / 'tests/naari_optical/fakes'),
+        str(ROOT / 'tests/naari_optical/readiness_test.cpp'), '-o', executable,
+    ], check=True)
+    results = [subprocess.run([executable, case], timeout=10).returncode for case in CASES]
+    print(f'Optical behavior: {results.count(0)}/{len(CASES)} passed', flush=True)
+    raise SystemExit(any(results))
