@@ -9,6 +9,7 @@ on:
       - "services/BleService.ts"
       - "app/(tabs)/safety.tsx"
       - "android/**"
+      - "scripts/test_naari_optical_readiness.py"
       - "tsconfig.naari-ci.json"
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
       - ".github/workflows/naari-kavach-closure.yml"
@@ -27,6 +28,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Regress optical READY handshake
+        run: python3 scripts/test_naari_optical_readiness.py
 
       - name: Enforce hardware and BLE invariants
         shell: bash
