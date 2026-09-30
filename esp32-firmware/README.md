@@ -1,4 +1,17 @@
-# ESP32 IoT Emergency SOS Wearable Firmware
+# ESP32 firmware
+
+## Current optical-sensor READY repair (30 September 2026)
+
+For the MAX30100/MAX30102 identified-but-not-ready problem, flash
+[`naari_kavach_dual_sensor_ble_test/naari_kavach_dual_sensor_ble_test.ino`](naari_kavach_dual_sensor_ble_test/naari_kavach_dual_sensor_ble_test.ino)
+from the repository's current default branch, `master`.
+The Wi-Fi and legacy BLE sketches below do **not** contain this repair.
+
+Follow the [READY repair and acceptance guide](../documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md).
+The Serial boot marker must be `[FIRMWARE] optical-ready-v2-20260930`.
+Compilation/host tests do not certify that a physical sensor works.
+
+## Other firmware variants
 
 This directory contains the production-grade Arduino C++ firmware for the **Naari Kavach** Wi-Fi IoT emergency safety wearable.
 

@@ -1,15 +1,19 @@
 name: NAARI KAVACH Closure Gate
 
 on:
+  push:
+    branches: [master, main]
   pull_request:
     branches:
       - master
+      - main
     paths:
       - "esp32-firmware/naari_kavach_dual_sensor_ble_test/**"
       - "services/BleService.ts"
       - "app/(tabs)/safety.tsx"
       - "android/**"
-      - "scripts/test_naari_optical_readiness.py"
+      - "scripts/test_naari_optical*.py"
+      - "tests/naari_optical/**"
       - "tsconfig.naari-ci.json"
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
       - ".github/workflows/naari-kavach-closure.yml"
@@ -31,6 +35,9 @@ jobs:
 
       - name: Regress optical READY handshake
         run: python3 scripts/test_naari_optical_readiness.py
+
+      - name: Execute optical fault and SOS regressions
+        run: python3 scripts/test_naari_optical_behavior.py
 
       - name: Enforce hardware and BLE invariants
         shell: bash
@@ -96,7 +103,7 @@ jobs:
           arduino-cli config init --overwrite
           arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32
+          arduino-cli core install esp32:esp32@3.3.12
 
       - name: Compile DOIT ESP32 DEVKIT V1 firmware
         shell: bash
@@ -107,6 +114,15 @@ jobs:
             --fqbn esp32:esp32:esp32doit-devkit-v1 \
             --output-dir build/naari-kavach \
             esp32-firmware/naari_kavach_dual_sensor_ble_test
+
+      - name: Record firmware source and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GITHUB_SHA" > build/naari-kavach/SOURCE_COMMIT.txt
+          printf '%s\n' 'esp32:esp32@3.3.12 / esp32doit-devkit-v1' > build/naari-kavach/BOARD.txt
+          cd build/naari-kavach
+          sha256sum *.bin > SHA256SUMS
 
       - name: Preserve flashable firmware binaries
         uses: actions/upload-artifact@v4
@@ -170,3 +186,44 @@ jobs:
           name: naari-kavach-android-debug-apk
           path: android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
+
+  delete-merged-repair-branch:
+    name: Delete merged repair branch
+    needs: [firmware-contract, firmware-compile, app-static, android-native]
+    if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - name: Delete only the merged and verified PR 3 branch
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const repairBranch = 'fix/naari-kavach-optical-ready';
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: 3 });
+            if (!pr.merged || pr.merge_commit_sha !== context.sha ||
+                pr.base.ref !== context.payload.repository.default_branch ||
+                pr.head.ref !== repairBranch || pr.head.repo?.full_name !== `${owner}/${repo}`) {
+              core.info('This push is not the verified merge of the repair branch; nothing to delete.');
+              return;
+            }
+            const { data: base } = await github.rest.git.getRef({ owner, repo, ref: `heads/${pr.base.ref}` });
+            if (base.object.sha !== context.sha) throw new Error('Default branch moved; refuse stale cleanup.');
+            let head;
+            try {
+              ({ data: head } = await github.rest.git.getRef({ owner, repo, ref: `heads/${repairBranch}` }));
+            } catch (error) {
+              if (error.status === 404) { core.info('Repair branch already deleted.'); return; }
+              throw error;
+            }
+            if (head.object.sha !== pr.head.sha) throw new Error('Repair branch moved; preserve new work.');
+            const { data: comparison } = await github.rest.repos.compareCommitsWithBasehead({
+              owner, repo, basehead: `${head.object.sha}...${base.object.sha}`
+            });
+            if (!['ahead', 'identical'].includes(comparison.status)) {
+              throw new Error('Repair head is not contained in the verified default branch.');
+            }
+            await github.rest.git.deleteRef({ owner, repo, ref: `heads/${repairBranch}` });
+            core.info(`Deleted ${repairBranch}; verified default branch remains authoritative.`);

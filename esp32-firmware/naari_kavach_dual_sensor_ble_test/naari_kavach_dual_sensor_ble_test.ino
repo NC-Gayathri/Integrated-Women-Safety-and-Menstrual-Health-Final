@@ -131,10 +131,16 @@ void sendBleEvent(const String& payload) {
 // -----------------------------------------------------------------------------
 // Bounded I2C helpers.
 // -----------------------------------------------------------------------------
+// Explicit declaration also keeps SOS servicing available inside I2C helpers.
+void updateButtonState();
+
 bool probeAddress(uint8_t addr) {
   for (uint8_t attempt = 0; attempt < I2C_TRANSACTION_ATTEMPTS; ++attempt) {
+    updateButtonState();
     Wire.beginTransmission(addr);
-    if (Wire.endTransmission(true) == 0) return true;
+    uint8_t error = Wire.endTransmission(true);
+    updateButtonState();
+    if (error == 0) return true;
     delay(1);
   }
   return false;
@@ -142,71 +148,68 @@ bool probeAddress(uint8_t addr) {
 
 bool readRegister8(uint8_t addr, uint8_t reg, uint8_t& value) {
   for (uint8_t attempt = 0; attempt < I2C_TRANSACTION_ATTEMPTS; ++attempt) {
+    updateButtonState();
     Wire.beginTransmission(addr);
     Wire.write(reg);
 
-    // Some MAX3010x breakout variants ACK identification but are unreliable
-    // with repeated-start register-pointer writes. Mirror the proven standalone
-    // diagnostic: if repeated-start fails, retry the pointer write with STOP.
-    uint8_t txError = Wire.endTransmission(false);
-    if (txError != 0) {
-      Wire.beginTransmission(addr);
-      Wire.write(reg);
-      txError = Wire.endTransmission(true);
-      if (txError != 0) {
-        delay(1);
-        continue;
+    // ESP32 defers the repeated-start transaction until requestFrom(). A zero
+    // return from endTransmission(false) alone does NOT prove the read worked.
+    // Retry the entire failed read with a STOP, including deferred RX failures.
+    uint8_t txError = attempt == 0 ? Wire.endTransmission(false) :
+                                    Wire.endTransmission(true);
+    updateButtonState();
+    if (txError == 0) {
+      int received = Wire.requestFrom((int)addr, 1, (int)true);
+      updateButtonState();
+      if (received == 1) {
+        value = Wire.read();
+        return true;
       }
+      while (Wire.available()) (void)Wire.read();
     }
-
-    int received = Wire.requestFrom((int)addr, 1, (int)true);
-    if (received == 1) {
-      value = Wire.read();
-      return true;
-    }
-
-    while (Wire.available()) (void)Wire.read();
     delay(1);
   }
+  Serial.printf("[I2C] Read failed addr=0x%02X reg=0x%02X.\n", addr, reg);
   return false;
 }
 
 bool writeRegister8(uint8_t addr, uint8_t reg, uint8_t value) {
+  uint8_t error = 0;
   for (uint8_t attempt = 0; attempt < I2C_TRANSACTION_ATTEMPTS; ++attempt) {
+    updateButtonState();
     Wire.beginTransmission(addr);
     Wire.write(reg);
     Wire.write(value);
-    if (Wire.endTransmission(true) == 0) return true;
+    error = Wire.endTransmission(true);
+    updateButtonState();
+    if (error == 0) return true;
     delay(1);
   }
+  Serial.printf("[I2C] Write failed addr=0x%02X reg=0x%02X value=0x%02X error=%u.\n",
+                addr, reg, value, error);
   return false;
 }
 
 bool readBytes(uint8_t addr, uint8_t reg, uint8_t* buffer, uint8_t length) {
   for (uint8_t attempt = 0; attempt < I2C_TRANSACTION_ATTEMPTS; ++attempt) {
+    updateButtonState();
     Wire.beginTransmission(addr);
     Wire.write(reg);
-
-    uint8_t txError = Wire.endTransmission(false);
-    if (txError != 0) {
-      Wire.beginTransmission(addr);
-      Wire.write(reg);
-      txError = Wire.endTransmission(true);
-      if (txError != 0) {
-        delay(1);
-        continue;
+    uint8_t txError = attempt == 0 ? Wire.endTransmission(false) :
+                                    Wire.endTransmission(true);
+    updateButtonState();
+    if (txError == 0) {
+      int received = Wire.requestFrom((int)addr, (int)length, (int)true);
+      updateButtonState();
+      if (received == length) {
+        for (uint8_t i = 0; i < length; ++i) buffer[i] = Wire.read();
+        return true;
       }
+      while (Wire.available()) (void)Wire.read();
+      // A partial FIFO read can advance the hardware pointer. Discard it;
+      // never turn the remainder plus a retry into an apparently valid sample.
+      if (received > 0) return false;
     }
-
-    int received = Wire.requestFrom((int)addr, (int)length, (int)true);
-    if (received == length) {
-      for (uint8_t i = 0; i < length; ++i) {
-        buffer[i] = Wire.read();
-      }
-      return true;
-    }
-
-    while (Wire.available()) (void)Wire.read();
     delay(1);
   }
   return false;
@@ -222,7 +225,8 @@ void updateButtonState() {
     lastDebounceTime = millis();
   }
 
-  if ((millis() - lastDebounceTime) > BUTTON_DEBOUNCE_MS) {
+  // Accept the 50 ms boundary too when I2C sampling lands exactly on it.
+  if ((millis() - lastDebounceTime) >= BUTTON_DEBOUNCE_MS) {
     static int currentStableState = HIGH;
 
     if (reading != currentStableState) {
@@ -392,6 +396,11 @@ enum OpticalChip {
   OPTICAL_UNKNOWN
 };
 
+// Arduino's auto-prototyper cannot infer this enum before its declaration.
+// Explicit prototypes prevent generated declarations preceding OpticalChip.
+bool resetOpticalSensor(OpticalChip chip);
+bool verifyOpticalConfiguration(OpticalChip chip);
+
 OpticalChip opticalChip = OPTICAL_NONE;
 bool opticalReady = false;
 uint8_t opticalPartId = 0;
@@ -519,38 +528,29 @@ bool resetOpticalSensor(OpticalChip chip) {
   return false;
 }
 
+bool verifyOpticalRegister(uint8_t reg, uint8_t expected, uint8_t mask) {
+  uint8_t actual = 0;
+  if (!readRegister8(MAX3010X_ADDR, reg, actual)) return false;
+  if ((actual & mask) == expected) return true;
+  Serial.printf("[OPTICAL] Read-back mismatch reg=0x%02X expected=0x%02X actual=0x%02X mask=0x%02X.\n",
+                reg, expected, actual, mask);
+  return false;
+}
+
 bool verifyOpticalConfiguration(OpticalChip chip) {
+  // Mask checks SHDN (bit 7), RESET (bit 6), and operating mode (bits 2:0).
+  // A powered-down sensor can still ACK and retain correct LED/SPO2 registers.
   if (chip == OPTICAL_MAX30100) {
-    uint8_t mode = 0;
-    uint8_t spo2 = 0;
-    uint8_t led = 0;
-
-    if (!readRegister8(MAX3010X_ADDR, 0x06, mode) ||
-        !readRegister8(MAX3010X_ADDR, 0x07, spo2) ||
-        !readRegister8(MAX3010X_ADDR, 0x09, led)) {
-      return false;
-    }
-
-    return (mode & 0x47) == 0x03 && spo2 == 0x47 && led == 0x55;
+    return verifyOpticalRegister(0x06, 0x03, 0xC7) &&
+           verifyOpticalRegister(0x07, 0x47, 0xFF) &&
+           verifyOpticalRegister(0x09, 0x55, 0xFF);
   }
-
   if (chip == OPTICAL_MAX30102) {
-    uint8_t mode = 0;
-    uint8_t spo2 = 0;
-    uint8_t redLed = 0;
-    uint8_t irLed = 0;
-
-    if (!readRegister8(MAX3010X_ADDR, 0x09, mode) ||
-        !readRegister8(MAX3010X_ADDR, 0x0A, spo2) ||
-        !readRegister8(MAX3010X_ADDR, 0x0C, redLed) ||
-        !readRegister8(MAX3010X_ADDR, 0x0D, irLed)) {
-      return false;
-    }
-
-    return (mode & 0x47) == 0x03 &&
-           spo2 == 0x27 && redLed == 0x3F && irLed == 0x3F;
+    return verifyOpticalRegister(0x09, 0x03, 0xC7) &&
+           verifyOpticalRegister(0x0A, 0x27, 0xFF) &&
+           verifyOpticalRegister(0x0C, 0x3F, 0xFF) &&
+           verifyOpticalRegister(0x0D, 0x3F, 0xFF);
   }
-
   return false;
 }
 
@@ -587,6 +587,8 @@ bool identifyAndConfigureOptical() {
     return false;
   }
 
+  Serial.printf("[OPTICAL] Identified %s PART_ID=0x%02X REV=0x%02X; resetting and verifying.\n",
+                opticalChipName(), opticalPartId, opticalRevisionId);
   if (!resetOpticalSensor(opticalChip)) {
     opticalReady = false;
     Serial.printf("[OPTICAL] %s identified but software reset did not complete.\n",
@@ -907,6 +909,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
+  Serial.println("[FIRMWARE] optical-ready-v2-20260930");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
