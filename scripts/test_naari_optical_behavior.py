@@ -15,8 +15,9 @@ CASES = [
     'absent', 'unreadable_identity', 'unknown', 'reset_timeout_100',
     'reset_timeout_102', 'write_failure_100', 'write_failure_102',
     'readback_failure_100', 'readback_failure_102', 'mismatch_100', 'mismatch_102',
-    'shutdown_100', 'shutdown_102', 'fifo_deferred_read', 'fifo_partial_read',
+    'shutdown_100', 'shutdown_102', 'burst_deferred_read', 'fifo_partial_read',
     'sos_during_init', 'disconnect_recovery', 'no_finger',
+    'fifo_error_consumed_100', 'fifo_error_consumed_102',
 ]
 with tempfile.TemporaryDirectory(prefix='naari-optical-') as temporary:
     executable = str(Path(temporary) / 'readiness-test')

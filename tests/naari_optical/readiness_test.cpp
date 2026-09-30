@@ -55,14 +55,32 @@ int main(int argc, char** argv) {
     } else if (name == "shutdown_100" || name == "shutdown_102") {
       Wire.shutdown = true;
       require(!identifyAndConfigureOptical(), "a shutdown sensor must never become READY"); noReady();
-    } else if (name == "fifo_deferred_read") {
+    } else if (name == "burst_deferred_read") {
       Wire.failRepeatedStart = true;
       uint8_t bytes[6] = {};
-      require(readBytes(0x57, 0x07, bytes, 6), "FIFO must recover deferred zero-byte read using STOP");
+      require(readBytes(0x57, 0x3B, bytes, 6), "idempotent burst read must recover deferred failure using STOP");
+    } else if (name == "fifo_error_consumed_100" || name == "fifo_error_consumed_102") {
+      require(identifyAndConfigureOptical(), "initial sensor must be ready");
+      Wire.regs[max100 ? 0x02 : 0x04] = 1;
+      Wire.regs[max100 ? 0x04 : 0x06] = 0;
+      Wire.fifoErrorAfterConsumption = true;
+      heartRateValid = spo2Valid = fingerPresent = true;
+      uint32_t red = 99, ir = 99;
+      bool accepted = max100 ? readMax30100Sample(red, ir) : readMax30102Sample(red, ir);
+      require(!accepted, "zero-count error after FIFO consumption must not be retried into a sample");
+      require(!opticalReady && !heartRateValid && !spo2Valid,
+              "ambiguous FIFO failure must invalidate sensor and readings until reset");
+      require(red == 99 && ir == 99, "failed FIFO transfer must not publish sample values");
+      Wire.fifoErrorAfterConsumption = false; delay(2100);
+      updateOpticalSensor();
+      require(opticalReady, "FIFO fault must recover by full reinitialization");
     } else if (name == "fifo_partial_read") {
+      require(identifyAndConfigureOptical(), "initial sensor must be ready");
+      Wire.regs[0x04] = 1; Wire.regs[0x06] = 0;
       Wire.shortFifo = true;
-      uint8_t bytes[6] = {};
-      require(!readBytes(0x57, 0x07, bytes, 6), "partial FIFO transfer must not be retried into a fabricated sample");
+      uint32_t red = 99, ir = 99;
+      require(!readMax30102Sample(red, ir), "partial FIFO transfer must not become a sample");
+      require(!opticalReady, "partial FIFO transfer must schedule reinitialization");
     } else if (name == "sos_during_init") {
       Wire.operationMs = 50;
       buttonEdges = {{100, LOW}, {280, HIGH}, {400, LOW}, {580, HIGH}, {700, LOW}, {880, HIGH}};

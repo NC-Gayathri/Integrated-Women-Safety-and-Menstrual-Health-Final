@@ -190,12 +190,14 @@ bool writeRegister8(uint8_t addr, uint8_t reg, uint8_t value) {
   return false;
 }
 
-bool readBytes(uint8_t addr, uint8_t reg, uint8_t* buffer, uint8_t length) {
-  for (uint8_t attempt = 0; attempt < I2C_TRANSACTION_ATTEMPTS; ++attempt) {
+bool readBytes(uint8_t addr, uint8_t reg, uint8_t* buffer, uint8_t length,
+               bool retrySafe = true) {
+  const uint8_t attempts = retrySafe ? I2C_TRANSACTION_ATTEMPTS : 1;
+  for (uint8_t attempt = 0; attempt < attempts; ++attempt) {
     updateButtonState();
     Wire.beginTransmission(addr);
     Wire.write(reg);
-    uint8_t txError = attempt == 0 ? Wire.endTransmission(false) :
+    uint8_t txError = retrySafe && attempt == 0 ? Wire.endTransmission(false) :
                                     Wire.endTransmission(true);
     updateButtonState();
     if (txError == 0) {
@@ -208,7 +210,7 @@ bool readBytes(uint8_t addr, uint8_t reg, uint8_t* buffer, uint8_t length) {
       while (Wire.available()) (void)Wire.read();
       // A partial FIFO read can advance the hardware pointer. Discard it;
       // never turn the remainder plus a retry into an apparently valid sample.
-      if (received > 0) return false;
+      if (!retrySafe || received > 0) return false;
     }
     delay(1);
   }
@@ -630,6 +632,20 @@ bool identifyAndConfigureOptical() {
   return true;
 }
 
+bool readOpticalFifo(uint8_t reg, uint8_t* buffer, uint8_t length) {
+  // FIFO reads consume samples. ESP32 reports zero on a bus error even when
+  // some bytes reached the sensor, so zero is NOT proof that retry is safe.
+  // Use STOP immediately and require one complete transfer. On any failure,
+  // invalidate the old readings and reset/reconfigure before consuming again.
+  if (readBytes(MAX3010X_ADDR, reg, buffer, length, false)) return true;
+  opticalReady = false;
+  resetVitalsState();
+  lastOpticalRetry = millis();
+  Serial.println("[OPTICAL] FIFO transfer failed; discarding samples and scheduling reset.");
+  sendBleEvent(String("SENSOR:") + opticalChipName() + ":I2C_ERROR");
+  return false;
+}
+
 bool readMax30100Sample(uint32_t& red, uint32_t& ir) {
   uint8_t wr = 0;
   uint8_t rd = 0;
@@ -641,7 +657,7 @@ bool readMax30100Sample(uint32_t& red, uint32_t& ir) {
   if (wr == rd) return false; // No unread sample.
 
   uint8_t raw[4];
-  if (!readBytes(MAX3010X_ADDR, 0x05, raw, sizeof(raw))) return false;
+  if (!readOpticalFifo(0x05, raw, sizeof(raw))) return false;
 
   // MAX30100 FIFO order in SpO2 mode is IR then RED.
   ir  = ((uint32_t)raw[0] << 8) | raw[1];
@@ -660,7 +676,7 @@ bool readMax30102Sample(uint32_t& red, uint32_t& ir) {
   if (wr == rd) return false; // No unread sample.
 
   uint8_t raw[6];
-  if (!readBytes(MAX3010X_ADDR, 0x07, raw, sizeof(raw))) return false;
+  if (!readOpticalFifo(0x07, raw, sizeof(raw))) return false;
 
   // MAX30102 SpO2 mode FIFO order is Red then IR; each sample is 18-bit.
   red = ((((uint32_t)raw[0] << 16) |
@@ -828,6 +844,8 @@ void updateOpticalSensor() {
     opticalConsecutiveErrors = 0;
     processOpticalSample(red, ir);
   }
+
+  if (!opticalReady) return; // FIFO fault requires reset before further reads.
 
   // A configured optical sensor should keep producing FIFO samples even with
   // no finger present. If samples stop, distinguish an unplugged bus from a

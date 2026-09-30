@@ -12,7 +12,8 @@ on:
       - "services/BleService.ts"
       - "app/(tabs)/safety.tsx"
       - "android/**"
-      - "scripts/test_naari_optical*.py"
+      - "scripts/test_naari_*.py"
+      - ".github/scripts/**"
       - "tests/naari_optical/**"
       - "tsconfig.naari-ci.json"
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
@@ -38,6 +39,9 @@ jobs:
 
       - name: Execute optical fault and SOS regressions
         run: python3 scripts/test_naari_optical_behavior.py
+
+      - name: Prove cleanup preserves concurrent branch updates
+        run: python3 scripts/test_naari_branch_cleanup.py
 
       - name: Enforce hardware and BLE invariants
         shell: bash
@@ -196,9 +200,13 @@ jobs:
       contents: write
       pull-requests: read
     steps:
-      - name: Delete only the merged and verified PR 3 branch
+      - uses: actions/checkout@v4
+
+      - name: Verify the merged PR 3 branch
+        id: verify
         uses: actions/github-script@v7
         with:
+          result-encoding: string
           script: |
             const { owner, repo } = context.repo;
             const repairBranch = 'fix/naari-kavach-optical-ready';
@@ -207,7 +215,7 @@ jobs:
                 pr.base.ref !== context.payload.repository.default_branch ||
                 pr.head.ref !== repairBranch || pr.head.repo?.full_name !== `${owner}/${repo}`) {
               core.info('This push is not the verified merge of the repair branch; nothing to delete.');
-              return;
+              return '';
             }
             const { data: base } = await github.rest.git.getRef({ owner, repo, ref: `heads/${pr.base.ref}` });
             if (base.object.sha !== context.sha) throw new Error('Default branch moved; refuse stale cleanup.');
@@ -215,7 +223,7 @@ jobs:
             try {
               ({ data: head } = await github.rest.git.getRef({ owner, repo, ref: `heads/${repairBranch}` }));
             } catch (error) {
-              if (error.status === 404) { core.info('Repair branch already deleted.'); return; }
+              if (error.status === 404) { core.info('Repair branch already deleted.'); return ''; }
               throw error;
             }
             if (head.object.sha !== pr.head.sha) throw new Error('Repair branch moved; preserve new work.');
@@ -225,5 +233,10 @@ jobs:
             if (!['ahead', 'identical'].includes(comparison.status)) {
               throw new Error('Repair head is not contained in the verified default branch.');
             }
-            await github.rest.git.deleteRef({ owner, repo, ref: `heads/${repairBranch}` });
-            core.info(`Deleted ${repairBranch}; verified default branch remains authoritative.`);
+            return head.object.sha;
+
+      - name: Delete with an atomic expected-head lease
+        if: steps.verify.outputs.result != ''
+        env:
+          REPAIR_HEAD: ${{ steps.verify.outputs.result }}
+        run: bash .github/scripts/delete-verified-repair-branch.sh

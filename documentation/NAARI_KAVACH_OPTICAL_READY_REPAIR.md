@@ -29,7 +29,9 @@ it does not assert that valid HR/SpO2 readings have already been acquired.
 - SOS polling happens before/after bus operations, including initialization.
   The 50 ms debounce accepts equality so a 50 ms polling boundary cannot hide
   an otherwise debounced click. Three-click/1.8-second behaviour is preserved.
-- Partial FIFO transfers are discarded; only complete samples are accepted.
+- FIFO reads use STOP on the first attempt and are never immediately retried.
+  The SDK can report zero after a partially consumed transfer. Every failed FIFO
+  transfer invalidates readings and schedules a full reset before more sampling.
 - Serial output identifies the chip before configuration and names the failed
   register/write or mismatched read-back value, plus the reset/write/read stage.
 
@@ -47,13 +49,16 @@ Run from repository root:
 ```sh
 python3 scripts/test_naari_optical_readiness.py
 python3 scripts/test_naari_optical_behavior.py
+python3 scripts/test_naari_branch_cleanup.py
 ```
 
 The behaviour runner compiles the actual integration sketch with a deterministic
 hardware boundary and UndefinedBehaviorSanitizer. The original inherited code
 passed 16/22 cases and failed deferred register read recovery, shutdown rejection
 for both chips, deferred FIFO read recovery, partial FIFO rejection, and SOS
-during initialization. All 22 cases pass after the repair.
+during initialization. A second review reproduced two additional FIFO cases where the hardware pointer
+advanced but the SDK reported zero bytes. The final suite passes **24/24** cases,
+including reinitialization after those errors.
 
 Other cases cover both chip identities, transient writes, missing/unknown or
 unreadable sensors, stuck reset, persistent configuration/read-back failures,
@@ -67,7 +72,10 @@ app's BLE TypeScript/lint contract, and builds the native Android debug APK.
 Its push run repeats validation after merge. Only after all four jobs succeed,
 the **Delete merged repair branch** job verifies PR #3's merged SHA, default
 branch, branch ownership, unchanged repair head and ancestry before deletion.
-It refuses deletion if new work has appeared on either branch.
+It refuses cleanup if the inspected default branch has moved. A Git expected-head
+lease atomically rejects deletion if the repair branch changes, including changes
+after the guard check. Three local Git integration checks prove changed-head
+preservation, exact-head deletion and rejection of a missing verified SHA.
 
 PR checks and run artifacts are the authoritative remote build evidence. The
 firmware artifact contains `SOURCE_COMMIT.txt`, `BOARD.txt` and `SHA256SUMS` so
@@ -125,6 +133,7 @@ a reset timeout or unknown PART_ID must not be bypassed by forcing READY true.
 ## Primary implementation references
 
 - [ESP32 Wire implementation](https://github.com/espressif/arduino-esp32/blob/3.3.12/libraries/Wire/src/Wire.cpp): deferred repeated-start transaction and requestFrom result.
+- [ESP32 I2C HAL](https://github.com/espressif/arduino-esp32/blob/3.3.12/cores/esp32/esp32-hal-i2c-ng.c): zero read count on transfer errors.
 - [Arduino build process](https://docs.arduino.cc/arduino-cli/sketch-build-process/): generated function prototypes.
 - [MAX30100 data sheet](https://www.analog.com/media/en/technical-documentation/data-sheets/max30100.pdf), Mode Configuration 0x06.
 - [MAX30102 data sheet](https://www.analog.com/media/en/technical-documentation/data-sheets/max30102.pdf), Mode Configuration 0x09 and FIFO semantics.

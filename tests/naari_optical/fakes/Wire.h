@@ -9,7 +9,7 @@ struct WireFake {
   uint8_t address = 0, pointer = 0, modeRegister = 0x09;
   bool nonStop = false, absent = false, failReads = false;
   bool failRepeatedStart = false, stuckReset = false, shutdown = false;
-  bool configured = false, shortFifo = false;
+  bool configured = false, shortFifo = false, fifoErrorAfterConsumption = false;
   int failWriteReg = -1, mismatchReg = -1, failReadReg = -1;
   int transientWrites = 0, pointerNacks = 0, fifoRequests = 0;
   unsigned long operationMs = 1;
@@ -61,6 +61,12 @@ struct WireFake {
     const bool fifo = (modeRegister == 0x06 && pointer == 0x05) ||
                       (modeRegister == 0x09 && pointer == 0x07);
     if (fifo) ++fifoRequests;
+    if (fifo && fifoErrorAfterConsumption && fifoRequests == 1) {
+      // ESP32 reports zero on any I2C error, even after hardware consumed bytes.
+      const auto readPointer = modeRegister == 0x06 ? 0x04 : 0x06;
+      ++regs[readPointer];
+      return 0;
+    }
     int count = fifo && shortFifo && fifoRequests == 1 ? length - 1 : length;
     for (int i = 0; i < count; ++i) {
       uint8_t value = regs[uint8_t(pointer + i)];
