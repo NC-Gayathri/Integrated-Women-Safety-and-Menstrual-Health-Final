@@ -17,6 +17,9 @@ on:
       - "tests/naari_optical/**"
       - "tsconfig.naari-ci.json"
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
+      - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
+      - "documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md"
+      - "esp32-firmware/README.md"
       - ".github/workflows/naari-kavach-closure.yml"
   workflow_dispatch:
 
@@ -202,15 +205,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify the merged PR 3 branch
+      - name: Verify the merged PR 4 branch
         id: verify
         uses: actions/github-script@v7
         with:
           result-encoding: string
           script: |
             const { owner, repo } = context.repo;
-            const repairBranch = 'fix/naari-kavach-optical-ready';
-            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: 3 });
+            const repairBranch = 'fix/naari-kavach-upload-recovery';
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: 4 });
             if (!pr.merged || pr.merge_commit_sha !== context.sha ||
                 pr.base.ref !== context.payload.repository.default_branch ||
                 pr.head.ref !== repairBranch || pr.head.repo?.full_name !== `${owner}/${repo}`) {
