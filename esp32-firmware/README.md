@@ -11,6 +11,11 @@ Follow the [READY repair and acceptance guide](../documentation/NAARI_KAVACH_OPT
 The Serial boot marker must be `[FIRMWARE] optical-ready-v2-20260930`.
 Compilation/host tests do not certify that a physical sensor works.
 
+**Upload stuck at `Connecting...` / `No serial data received`?** Follow the
+[Windows/Arduino ESP32 upload recovery guide](../documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md)
+for the BOOT/EN sequence and port checks. The 3 October log compiled successfully;
+the failure happened before the upload could start.
+
 ## Other firmware variants
 
 This directory contains the production-grade Arduino C++ firmware for the **Naari Kavach** Wi-Fi IoT emergency safety wearable.

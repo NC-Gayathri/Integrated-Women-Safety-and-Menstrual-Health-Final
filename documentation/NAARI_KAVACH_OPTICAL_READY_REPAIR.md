@@ -69,9 +69,10 @@ RTOS scheduling or a real BLE radio.
 The `NAARI KAVACH Closure Gate` also builds the real sketch for
 `esp32:esp32:esp32doit-devkit-v1` using ESP32 Arduino core **3.3.12**, checks the
 app's BLE TypeScript/lint contract, and builds the native Android debug APK.
-Its push run repeats validation after merge. Only after all four jobs succeed,
-the **Delete merged repair branch** job verifies PR #3's merged SHA, default
-branch, branch ownership, unchanged repair head and ancestry before deletion.
+Its push run repeats validation after merge. For PR #3, the **Delete merged
+repair branch** job verified its merged SHA, default branch, branch ownership,
+unchanged repair head and ancestry before deletion, after all four jobs passed.
+The workflow now targets the upload-recovery follow-up PR #4 with the same guards.
 It refuses cleanup if the inspected default branch has moved. A Git expected-head
 lease atomically rejects deletion if the repair branch changes, including changes
 after the guard check. Three local Git integration checks prove changed-head
@@ -82,6 +83,11 @@ firmware artifact contains `SOURCE_COMMIT.txt`, `BOARD.txt` and `SHA256SUMS` so
 the downloaded binary can be traced to the build. A debug APK is a test build.
 
 ## Flash exactly this sketch
+
+If compilation succeeds but upload reports **Failed to connect to ESP32: No
+serial data received**, use the [ESP32 upload recovery procedure](NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md).
+That error occurs before the new firmware runs. It requires checking the port,
+USB connection and BOOT/EN download-mode entry before evaluating sensor READY.
 
 1. Download/pull the current default branch after PR #3 is merged.
 2. Open `esp32-firmware/naari_kavach_dual_sensor_ble_test/naari_kavach_dual_sensor_ble_test.ino`.

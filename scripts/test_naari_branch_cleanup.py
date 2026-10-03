@@ -7,7 +7,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / '.github/scripts/delete-verified-repair-branch.sh'
-REF = 'refs/heads/fix/naari-kavach-optical-ready'
+REF = 'refs/heads/fix/naari-kavach-upload-recovery'
 
 def git(path, *args):
     return subprocess.check_output(['git', '-C', str(path), *args], stderr=subprocess.PIPE, text=True).strip()

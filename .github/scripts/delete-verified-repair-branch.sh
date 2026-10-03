@@ -6,5 +6,5 @@ if [[ ! "${REPAIR_HEAD:-}" =~ ^[0-9a-f]{40}$ ]]; then
   echo 'Missing or invalid verified repair SHA; refusing deletion.' >&2
   exit 1
 fi
-repair_ref='refs/heads/fix/naari-kavach-optical-ready'
+repair_ref='refs/heads/fix/naari-kavach-upload-recovery'
 git push --force-with-lease="${repair_ref}:${REPAIR_HEAD}" origin ":${repair_ref}"
