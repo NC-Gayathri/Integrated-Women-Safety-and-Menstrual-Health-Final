@@ -34,7 +34,8 @@ USB/serial connection, or power problem.
    writing progress starts.
 7. Wait for the upload to finish successfully. With BOOT released, tap
    **EN/RESET** to start the application if it does not start automatically.
-8. Open Serial Monitor at **115200 baud** and capture the boot output. Confirm:
+8. Open Serial Monitor at **115200 baud**. With BOOT released, tap **EN/RESET**
+   and capture the boot output from this reset. Confirm:
 
 ```text
 [FIRMWARE] optical-ready-v2-20260930
