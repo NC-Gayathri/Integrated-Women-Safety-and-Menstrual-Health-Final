@@ -83,6 +83,11 @@ the downloaded binary can be traced to the build. A debug APK is a test build.
 
 ## Flash exactly this sketch
 
+If compilation succeeds but upload reports **Failed to connect to ESP32: No
+serial data received**, use the [ESP32 upload recovery procedure](NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md).
+That error occurs before the new firmware runs. It requires checking the port,
+USB connection and BOOT/EN download-mode entry before evaluating sensor READY.
+
 1. Download/pull the current default branch after PR #3 is merged.
 2. Open `esp32-firmware/naari_kavach_dual_sensor_ble_test/naari_kavach_dual_sensor_ble_test.ino`.
 3. In Arduino IDE select **DOIT ESP32 DEVKIT V1**, ESP32 core **3.3.12**, and
