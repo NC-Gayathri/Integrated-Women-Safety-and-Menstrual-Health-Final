@@ -205,7 +205,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify the merged PR 5 branch
+      - name: Verify the merged PR 6 branch
         id: verify
         uses: actions/github-script@v7
         with:
@@ -213,7 +213,7 @@ jobs:
           script: |
             const { owner, repo } = context.repo;
             const repairBranch = 'fix/naari-kavach-mpu6500-compatibility';
-            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: 5 });
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: 6 });
             if (!pr.merged || pr.merge_commit_sha !== context.sha ||
                 pr.base.ref !== context.payload.repository.default_branch ||
                 pr.head.ref !== repairBranch || pr.head.repo?.full_name !== `${owner}/${repo}`) {
@@ -236,10 +236,49 @@ jobs:
             if (!['ahead', 'identical'].includes(comparison.status)) {
               throw new Error('Repair head is not contained in the verified default branch.');
             }
+            core.setOutput('branch', repairBranch);
             return head.object.sha;
 
       - name: Delete with an atomic expected-head lease
         if: steps.verify.outputs.result != ''
         env:
+          REPAIR_BRANCH: ${{ steps.verify.outputs.branch }}
           REPAIR_HEAD: ${{ steps.verify.outputs.result }}
+        run: bash .github/scripts/delete-verified-repair-branch.sh
+
+      - name: Verify disposable RED-proof staging branch
+        id: verify-redproof
+        if: steps.verify.outputs.result != ''
+        uses: actions/github-script@v7
+        with:
+          result-encoding: string
+          script: |
+            const { owner, repo } = context.repo;
+            const stagingBranch = 'fix/naari-kavach-mpu6500-compatibility-redproof';
+            const expectedHead = '443587b9649401cad2c5a8f9b028765f3a2dac77';
+            const defaultBranch = context.payload.repository.default_branch;
+            const { data: base } = await github.rest.git.getRef({ owner, repo, ref: `heads/${defaultBranch}` });
+            if (base.object.sha !== context.sha) throw new Error('Default branch moved; refuse stale staging cleanup.');
+            let head;
+            try {
+              ({ data: head } = await github.rest.git.getRef({ owner, repo, ref: `heads/${stagingBranch}` }));
+            } catch (error) {
+              if (error.status === 404) { core.info('RED-proof staging branch already deleted.'); return ''; }
+              throw error;
+            }
+            if (head.object.sha !== expectedHead) throw new Error('RED-proof staging branch moved; preserve new work.');
+            const { data: comparison } = await github.rest.repos.compareCommitsWithBasehead({
+              owner, repo, basehead: `${head.object.sha}...${base.object.sha}`
+            });
+            if (!['ahead', 'identical'].includes(comparison.status)) {
+              throw new Error('RED-proof staging head is not contained in the verified default branch.');
+            }
+            core.setOutput('branch', stagingBranch);
+            return head.object.sha;
+
+      - name: Delete disposable RED-proof branch with exact lease
+        if: steps.verify-redproof.outputs.result != ''
+        env:
+          REPAIR_BRANCH: ${{ steps.verify-redproof.outputs.branch }}
+          REPAIR_HEAD: ${{ steps.verify-redproof.outputs.result }}
         run: bash .github/scripts/delete-verified-repair-branch.sh
