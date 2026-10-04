@@ -2,7 +2,7 @@
 
 ## Current evidence — 4 October 2026
 
-The submitted Windows/Arduino log proves the **current dual-sensor sketch compiled and linked successfully** for `esp32:esp32:esp32doit-devkit-v1` using ESP32 Arduino core **3.3.12**. Image generation also completed and a 4 MB merged image was produced.
+The earlier submitted Windows/Arduino log showed the then-current dual-sensor sketch compiling and linking successfully for `esp32:esp32:esp32doit-devkit-v1` using ESP32 Arduino core **3.3.12**. Image generation also completed and a 4 MB merged image was produced. That historical compile is not proof that the latest revision has been flashed.
 
 The attempt then failed at the serial-loader boundary on the selected Windows port with:
 
@@ -18,7 +18,7 @@ That failure happens **before the new application firmware can run**. It does no
 The current acceptance marker is:
 
 ```text
-[FIRMWARE] mpu6500-ready-v3-20261004
+[FIRMWARE] vitals-acquisition-v4-20261004
 ```
 
 Any older firmware marker is stale and must not be used as physical acceptance evidence.
@@ -116,7 +116,7 @@ Again, substitute the actual verified port. The historical filename is retained 
 With BOOT released, tap EN/RESET. Physical boot acceptance requires:
 
 ```text
-[FIRMWARE] mpu6500-ready-v3-20261004
+[FIRMWARE] vitals-acquisition-v4-20261004
 ```
 
 For the reported motion device, MPU acceptance then requires the current firmware to identify and configure the part, for example:

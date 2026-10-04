@@ -2,8 +2,9 @@
 
 The original integration branch was merged into `master` in PR #2. Run these
 physical acceptance checks against the current default branch (`master`) and
-record the exact commit flashed. PR #3 continues the optical READY repair; see
-[its repair guide](NAARI_KAVACH_OPTICAL_READY_REPAIR.md).
+record the exact commit flashed. See the current
+[READY guide](NAARI_KAVACH_OPTICAL_READY_REPAIR.md) and
+[vitals acquisition guide](NAARI_KAVACH_VITALS_ACQUISITION.md).
 
 These remain physical acceptance gates. A code merge or passing CI does not
 mark any unobserved hardware check as passed.
@@ -20,13 +21,14 @@ mark any unobserved hardware check as passed.
 - Software mode: `INPUT_PULLUP`
 - Required behavior: three presses within 1.8 seconds
 
-### GY-521 / MPU-6050
+### Motion module: MPU6050 or MPU6500
 - VCC: 3.3V
 - GND: GND
 - SDA: GPIO 21
 - SCL: GPIO 22
 - AD0: leave at board default unless intentionally changed
 - Expected I2C address: 0x68; firmware also checks 0x69
+- WHO_AM_I: 0x68 for MPU6050, 0x70 for MPU6500; the reported board identifies as MPU6500
 - INT/XDA/XCL: not required for this integration
 
 ### MAX3010x optical board
@@ -70,7 +72,7 @@ Expected boot evidence must include:
 - I2C SDA=21, SCL=22, 100000 Hz
 - Wi-Fi disabled
 - HTTP disabled
-- MPU6050 ready at 0x68 or 0x69, OR a non-fatal "not detected" message
+- MPU6050/MPU6500 ready at 0x68 or 0x69, OR a non-fatal "not detected" message (a missing sensor does not pass its physical gate)
 - Optical sensor identified as MAX30100 or MAX30102 from PART_ID, OR a non-fatal explicit error
 - Final BLE/SOS startup message; this alone does **not** prove optical readiness
 - Separate `SENSOR:MAX30100:READY` or `SENSOR:MAX30102:READY` after verified configuration
@@ -103,6 +105,11 @@ With no finger:
 
 SpO2 is a prototype estimate from real red/IR samples and is not a medical diagnosis.
 
+Capture the v4 `[SIGNAL]` lines during five seconds without contact, 30 seconds
+of steady finger coverage, then five seconds after removal. The phone must
+clear both old readings on `VITALS:NO_VALID_READING` or `VITALS:ACQUIRING`;
+subsequent valid numeric packets restore only their corresponding readings.
+
 ## 7. SOS priority tests
 
 ### Test A — optical sensor absent at boot
@@ -134,10 +141,10 @@ PASS only if:
 
 PASS only if SOS is detected normally and without a long sensor-induced delay.
 
-## 8. MPU-6050 / fall path
+## 8. MPU6050 / MPU6500 fall path
 
-With GY-521 connected:
-- boot must identify MPU6050,
+With the motion module connected:
+- boot/retry must identify the actual MPU6050 or MPU6500 and reach chip-specific READY,
 - motion reads must not interfere with SOS,
 - sensor I2C failure must be non-fatal.
 

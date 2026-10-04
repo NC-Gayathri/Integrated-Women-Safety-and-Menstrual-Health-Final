@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ExpectedMarker = '[FIRMWARE] mpu6500-ready-v3-20261004'
+$ExpectedMarker = '[FIRMWARE] vitals-acquisition-v4-20261004'
 $serial = $null
 $markerSeen = $false
 

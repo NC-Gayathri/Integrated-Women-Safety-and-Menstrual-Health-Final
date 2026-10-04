@@ -104,7 +104,8 @@ export default function SafetyScreen() {
           setLiveSpo2(null);
         }
       } else if (event.type === 'VITALS_STATUS' && event.vitalsStatus) {
-        if (event.vitalsStatus.toUpperCase().includes('NO_VALID_READING')) {
+        const upper = event.vitalsStatus.toUpperCase();
+        if (upper.includes('NO_VALID_READING') || upper.includes('ACQUIRING')) {
           setLiveBpm(null);
           setLiveSpo2(null);
         }

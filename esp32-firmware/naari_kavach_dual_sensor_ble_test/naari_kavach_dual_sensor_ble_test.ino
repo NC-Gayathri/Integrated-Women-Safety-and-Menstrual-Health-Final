@@ -86,6 +86,8 @@ bool oldDeviceConnected = false;
 #define OPTICAL_RESET_POLL_MS 5
 #define MPU_RETRY_INTERVAL_MS 2000
 #define VITALS_REPORT_INTERVAL_MS 1000
+#define OPTICAL_SAMPLE_PERIOD_MS 10 // Both verified configurations: 100 samples/s.
+#define OPTICAL_SAMPLE_MAX_AGE_MS 500
 #define SENSOR_STATUS_INTERVAL_MS 5000
 #define LED_PULSE_MS 180
 
@@ -497,6 +499,13 @@ double irSqSum = 0.0;
 float latestSpo2 = 0.0f;
 bool spo2Valid = false;
 bool fingerPresent = false;
+bool peakArmed = false;
+bool opticalSampleSeen = false;
+bool opticalClipped = false;
+uint32_t lastRedRaw = 0;
+uint32_t lastIrRaw = 0;
+unsigned long opticalSampleTimeMs = 0;
+unsigned long opticalSampleCount = 0;
 
 const char* opticalChipName() {
   switch (opticalChip) {
@@ -507,13 +516,9 @@ const char* opticalChipName() {
   }
 }
 
-void resetVitalsState() {
-  irDc = 0.0;
-  redDc = 0.0;
-  irEnvelope = 0.0;
-  previousIrAc = 0.0;
-  previousSlopePositive = false;
+void invalidateVitalEstimates() {
   lastPeakAt = 0;
+  peakArmed = false;
   filteredBpm = 0.0f;
   heartRateValid = false;
 
@@ -524,7 +529,20 @@ void resetVitalsState() {
   irSqSum = 0.0;
   latestSpo2 = 0.0f;
   spo2Valid = false;
+}
+
+void resetVitalsState() {
+  invalidateVitalEstimates();
+  irDc = 0.0;
+  redDc = 0.0;
+  irEnvelope = 0.0;
+  previousIrAc = 0.0;
+  previousSlopePositive = false;
   fingerPresent = false;
+  opticalSampleSeen = false;
+  opticalClipped = false;
+  lastRedRaw = lastIrRaw = 0;
+  opticalSampleTimeMs = opticalSampleCount = 0;
 }
 
 bool configureMax30100() {
@@ -613,6 +631,7 @@ bool verifyOpticalConfiguration(OpticalChip chip) {
   }
   if (chip == OPTICAL_MAX30102) {
     return verifyOpticalRegister(0x09, 0x03, 0xC7) &&
+           verifyOpticalRegister(0x08, 0x00, 0xFF) &&
            verifyOpticalRegister(0x0A, 0x27, 0xFF) &&
            verifyOpticalRegister(0x0C, 0x3F, 0xFF) &&
            verifyOpticalRegister(0x0D, 0x3F, 0xFF);
@@ -713,8 +732,18 @@ bool readOpticalFifo(uint8_t reg, uint8_t* buffer, uint8_t length) {
 bool readMax30100Sample(uint32_t& red, uint32_t& ir) {
   uint8_t wr = 0;
   uint8_t rd = 0;
+  uint8_t overflow = 0;
   if (!readRegister8(MAX3010X_ADDR, 0x02, wr)) return false;
   if (!readRegister8(MAX3010X_ADDR, 0x04, rd)) return false;
+  if (!readRegister8(MAX3010X_ADDR, 0x03, overflow)) return false;
+  if ((overflow & 0x0F) != 0) {
+    opticalReady = false;
+    resetVitalsState();
+    lastOpticalRetry = millis();
+    Serial.println("[OPTICAL] FIFO_OVERFLOW: samples lost; resetting acquisition.");
+    sendBleEvent("SENSOR:MAX30100:NOT_READY");
+    return false;
+  }
 
   wr &= 0x0F;
   rd &= 0x0F;
@@ -732,8 +761,19 @@ bool readMax30100Sample(uint32_t& red, uint32_t& ir) {
 bool readMax30102Sample(uint32_t& red, uint32_t& ir) {
   uint8_t wr = 0;
   uint8_t rd = 0;
+  uint8_t overflow = 0;
   if (!readRegister8(MAX3010X_ADDR, 0x04, wr)) return false;
   if (!readRegister8(MAX3010X_ADDR, 0x06, rd)) return false;
+  // Check before popping: MAX30102 clears overflow when a sample is read.
+  if (!readRegister8(MAX3010X_ADDR, 0x05, overflow)) return false;
+  if ((overflow & 0x1F) != 0) {
+    opticalReady = false;
+    resetVitalsState();
+    lastOpticalRetry = millis();
+    Serial.println("[OPTICAL] FIFO_OVERFLOW: samples lost; resetting acquisition.");
+    sendBleEvent("SENSOR:MAX30102:NOT_READY");
+    return false;
+  }
 
   wr &= 0x1F;
   rd &= 0x1F;
@@ -755,10 +795,36 @@ bool readMax30102Sample(uint32_t& red, uint32_t& ir) {
 }
 
 void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
-  // Initialize DC baselines from the first real sample.
-  if (irDc == 0.0 || redDc == 0.0) {
+  const unsigned long receivedAt = millis();
+  if (opticalSampleSeen && receivedAt - lastOpticalSampleAt > OPTICAL_SAMPLE_MAX_AGE_MS) {
+    invalidateVitalEstimates();
+    fingerPresent = false;
+  }
+  lastOpticalSampleAt = receivedAt;
+  opticalSampleSeen = true;
+  lastRedRaw = redRaw;
+  lastIrRaw = irRaw;
+  ++opticalSampleCount;
+  opticalSampleTimeMs += OPTICAL_SAMPLE_PERIOD_MS;
+
+  const uint32_t fullScale = opticalChip == OPTICAL_MAX30100 ? 0xFFFF : 0x3FFFF;
+  opticalClipped = redRaw >= fullScale || irRaw >= fullScale;
+  const bool hadContact = fingerPresent;
+  // Light level is a contact heuristic, not proof of a pulse. An AC trough
+  // between beats must not erase beat history. Raw light detects removal
+  // immediately instead of waiting for the slow DC baseline to decay.
+  fingerPresent = !opticalClipped && irRaw > 3000 && redRaw > 1000;
+  if (!fingerPresent) {
+    invalidateVitalEstimates();
+    irDc = redDc = irEnvelope = previousIrAc = 0.0;
+    previousSlopePositive = false;
+    return;
+  }
+  if (!hadContact) {
     irDc = irRaw;
     redDc = redRaw;
+    irEnvelope = previousIrAc = 0.0;
+    previousSlopePositive = false;
   }
 
   // Slow DC tracking; AC carries the pulsatile component.
@@ -767,28 +833,36 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
   redDc = alpha * redDc + (1.0 - alpha) * (double)redRaw;
 
   const double irAc = (double)irRaw - irDc;
-  const double redAc = (double)redRaw - redDc;
 
   irEnvelope = 0.95 * irEnvelope + 0.05 * fabs(irAc);
-
-  // Scale-independent finger check: meaningful DC light plus pulsatile energy.
-  fingerPresent = (irDc > 3000.0 && redDc > 1000.0 && irEnvelope > 10.0);
 
   // Heart-rate peak detection from the real IR AC waveform.
   bool slopePositive = irAc > previousIrAc;
   double peakThreshold = fmax(15.0, irEnvelope * 0.55);
+  // FIFO batches retain their 100 sps sample spacing despite host I2C delays.
+  const unsigned long now = opticalSampleTimeMs;
+  if (lastPeakAt != 0 && now - lastPeakAt > 2000) invalidateVitalEstimates();
+  if (irAc < 0.0) peakArmed = true;
 
-  if (fingerPresent &&
+  if (peakArmed &&
       previousSlopePositive &&
       !slopePositive &&
       previousIrAc > peakThreshold) {
-    unsigned long now = millis();
+    peakArmed = false; // At most one candidate per positive half-wave.
 
-    if (lastPeakAt != 0) {
-      unsigned long interval = now - lastPeakAt;
+    if (lastPeakAt == 0) {
+      lastPeakAt = now;
+    } else {
+      const unsigned long interval = now - lastPeakAt;
 
-      // 30-200 BPM physiological sanity range for prototype filtering.
-      if (interval >= 300 && interval <= 2000) {
+      // A candidate above the supported 200 BPM ceiling is evidence that the
+      // current timing chain is invalid. Do not retain the older timestamp:
+      // doing so lets every second fast peak alias into a slower valid rate.
+      if (interval < 300) {
+        invalidateVitalEstimates();
+      } else {
+        // 30-200 BPM sanity range for prototype filtering. Intervals above
+        // 2000 ms are already expired by the check immediately above.
         float bpm = 60000.0f / (float)interval;
 
         if (filteredBpm <= 0.0f) {
@@ -798,66 +872,51 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
         }
 
         heartRateValid = filteredBpm >= 30.0f && filteredBpm <= 200.0f;
+        lastPeakAt = now;
       }
     }
-
-    lastPeakAt = now;
   }
 
   previousSlopePositive = slopePositive;
   previousIrAc = irAc;
 
-  // Ratio-of-ratios window for real-signal SpO2 estimate.
-  if (fingerPresent) {
-    redSum += redRaw;
-    irSum += irRaw;
-    redSqSum += (double)redRaw * (double)redRaw;
-    irSqSum += (double)irRaw * (double)irRaw;
-    spo2Samples++;
+  // Ratio-of-ratios window; the no-contact path already returned above.
+  redSum += redRaw;
+  irSum += irRaw;
+  redSqSum += (double)redRaw * (double)redRaw;
+  irSqSum += (double)irRaw * (double)irRaw;
+  spo2Samples++;
 
-    if (spo2Samples >= SPO2_WINDOW) {
-      const double n = (double)spo2Samples;
-      const double redMean = redSum / n;
-      const double irMean = irSum / n;
+  if (spo2Samples >= SPO2_WINDOW) {
+    const double n = (double)spo2Samples;
+    const double redMean = redSum / n;
+    const double irMean = irSum / n;
 
-      double redVariance = (redSqSum / n) - (redMean * redMean);
-      double irVariance = (irSqSum / n) - (irMean * irMean);
+    double redVariance = (redSqSum / n) - (redMean * redMean);
+    double irVariance = (irSqSum / n) - (irMean * irMean);
 
-      if (redVariance < 0.0) redVariance = 0.0;
-      if (irVariance < 0.0) irVariance = 0.0;
+    if (redVariance < 0.0) redVariance = 0.0;
+    if (irVariance < 0.0) irVariance = 0.0;
 
-      const double redRms = sqrt(redVariance);
-      const double irRms = sqrt(irVariance);
+    const double redRms = sqrt(redVariance);
+    const double irRms = sqrt(irVariance);
 
-      if (redMean > 0.0 && irMean > 0.0 && redRms > 0.0 && irRms > 0.0) {
-        const double ratio = (redRms / redMean) / (irRms / irMean);
+    if (heartRateValid && redMean > 0.0 && irMean > 0.0 && redRms > 0.0 && irRms > 0.0) {
+      const double ratio = (redRms / redMean) / (irRms / irMean);
 
-        // Common prototype approximation. It is derived from real samples,
-        // but it is NOT a medical calibration curve.
-        double estimate = 110.0 - 25.0 * ratio;
+      // Common prototype approximation. It is derived from real samples,
+      // but it is NOT a medical calibration curve.
+      double estimate = 110.0 - 25.0 * ratio;
 
-        if (estimate >= 70.0 && estimate <= 100.0 && ratio > 0.1 && ratio < 2.0) {
-          latestSpo2 = (float)estimate;
-          spo2Valid = true;
-        } else {
-          spo2Valid = false;
-        }
+      if (estimate >= 70.0 && estimate <= 100.0 && ratio > 0.1 && ratio < 2.0) {
+        latestSpo2 = (float)estimate;
+        spo2Valid = true;
       } else {
         spo2Valid = false;
       }
-
-      spo2Samples = 0;
-      redSum = 0.0;
-      irSum = 0.0;
-      redSqSum = 0.0;
-      irSqSum = 0.0;
+    } else {
+      spo2Valid = false;
     }
-  } else {
-    // Never carry stale "good" values across a missing-finger condition.
-    heartRateValid = false;
-    spo2Valid = false;
-    filteredBpm = 0.0f;
-    lastPeakAt = 0;
 
     spo2Samples = 0;
     redSum = 0.0;
@@ -865,6 +924,22 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
     redSqSum = 0.0;
     irSqSum = 0.0;
   }
+}
+
+const char* opticalSignalReason() {
+  if (!opticalSampleSeen || millis() - lastOpticalSampleAt > OPTICAL_SAMPLE_MAX_AGE_MS) return "NO_SAMPLES";
+  if (opticalClipped) return "SATURATED";
+  if (!fingerPresent) return "LOW_LIGHT";
+  if (heartRateValid && spo2Valid) return "VALID";
+  if (heartRateValid) return "SPO2_ACQUIRING";
+  if (irEnvelope <= 10.0) return "WEAK_PULSE";
+  return "ACQUIRING";
+}
+
+void reportOpticalSignal() {
+  Serial.printf("[SIGNAL] samples=%lu red=%lu ir=%lu red_dc=%.1f ir_dc=%.1f ir_ac=%.1f age_ms=%lu reason=%s\n",
+                opticalSampleCount, (unsigned long)lastRedRaw, (unsigned long)lastIrRaw,
+                redDc, irDc, irEnvelope, millis() - lastOpticalSampleAt, opticalSignalReason());
 }
 
 void updateOpticalSensor() {
@@ -903,12 +978,16 @@ void updateOpticalSensor() {
     if (!gotSample) break;
 
     samplesReadThisLoop++;
-    lastOpticalSampleAt = now;
     opticalConsecutiveErrors = 0;
     processOpticalSample(red, ir);
   }
 
   if (!opticalReady) return; // FIFO fault requires reset before further reads.
+  now = millis(); // I2C work advances time after the sample's receipt timestamp.
+  if (!opticalSampleSeen || now - lastOpticalSampleAt > OPTICAL_SAMPLE_MAX_AGE_MS) {
+    invalidateVitalEstimates();
+    fingerPresent = false;
+  }
 
   // A configured optical sensor should keep producing FIFO samples even with
   // no finger present. If samples stop, distinguish an unplugged bus from a
@@ -940,10 +1019,17 @@ void updateOpticalSensor() {
 
   if (now - lastVitalsReport >= VITALS_REPORT_INTERVAL_MS) {
     lastVitalsReport = now;
+    reportOpticalSignal();
 
-    if (!fingerPresent) {
+    if (!fingerPresent || (!heartRateValid && irEnvelope <= 10.0)) {
       sendBleEvent("VITALS:NO_VALID_READING");
       return;
+    }
+
+    // Clear the phone's old pair before restoring whichever estimates are
+    // currently valid. A lost SpO2 window must not leave an old value visible.
+    if (!heartRateValid || !spo2Valid) {
+      sendBleEvent("VITALS:ACQUIRING");
     }
 
     if (heartRateValid) {
@@ -952,10 +1038,6 @@ void updateOpticalSensor() {
 
     if (spo2Valid) {
       sendBleEvent(String("SPO2:") + String((int)lroundf(latestSpo2)));
-    }
-
-    if (!heartRateValid && !spo2Valid) {
-      sendBleEvent("VITALS:ACQUIRING");
     }
   }
 }
@@ -996,7 +1078,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
-  Serial.println("[FIRMWARE] mpu6500-ready-v3-20261004");
+  Serial.println("[FIRMWARE] vitals-acquisition-v4-20261004");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
