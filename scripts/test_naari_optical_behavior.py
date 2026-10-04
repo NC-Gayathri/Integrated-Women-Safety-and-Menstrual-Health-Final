@@ -18,8 +18,12 @@ CASES = [
     'shutdown_100', 'shutdown_102', 'burst_deferred_read', 'fifo_partial_read',
     'sos_during_init', 'disconnect_recovery', 'no_finger',
     'fifo_error_consumed_100', 'fifo_error_consumed_102',
+    'mpu6050_ready', 'mpu6500_ready', 'mpu6500_high_address',
+    'mpu_unknown_identity', 'mpu6500_config_write_failure',
+    'mpu6500_config_readback_mismatch', 'mpu6500_wake_readback_mismatch',
+    'mpu6500_reconnect', 'mpu6500_sos_during_init',
 ]
-with tempfile.TemporaryDirectory(prefix='naari-optical-') as temporary:
+with tempfile.TemporaryDirectory(prefix='naari-sensors-') as temporary:
     executable = str(Path(temporary) / 'readiness-test')
     subprocess.run([
         os.environ.get('CXX', 'g++'), '-std=c++17', '-Wall', '-Wextra', '-Werror',
@@ -28,5 +32,5 @@ with tempfile.TemporaryDirectory(prefix='naari-optical-') as temporary:
         str(ROOT / 'tests/naari_optical/readiness_test.cpp'), '-o', executable,
     ], check=True)
     results = [subprocess.run([executable, case], timeout=10).returncode for case in CASES]
-    print(f'Optical behavior: {results.count(0)}/{len(CASES)} passed', flush=True)
+    print(f'Sensor behavior: {results.count(0)}/{len(CASES)} passed', flush=True)
     raise SystemExit(any(results))
