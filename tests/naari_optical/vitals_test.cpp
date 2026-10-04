@@ -54,6 +54,13 @@ int main(int argc, char** argv) {
       pulse(2480, 80, false, 31);
       require(heartRateValid && filteredBpm >= 74 && filteredBpm <= 76,
               "FIFO batch timing must not change a 75 BPM sampled waveform");
+    } else if (name == "too_fast_pulse") {
+      // 25 samples/beat at 100 sps = 250 ms = 240 BPM, beyond the supported
+      // 200 BPM ceiling. The detector must reject this cadence, not ignore one
+      // peak and alias every second peak into a plausible 500 ms / 120 BPM rate.
+      pulse(1600, 25);
+      report();
+      noNumbers();
     } else if (name == "dark" || name == "flat_light") {
       for (int i = 0; i < 400; ++i) {
         delay(10);
