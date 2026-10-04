@@ -535,7 +535,8 @@ class BleService {
     // 6. Vitals validity/acquisition state. These are deliberately not
     // converted into numeric readings.
     if (text.toUpperCase().startsWith('VITALS:')) {
-      if (text.toUpperCase().includes('NO_VALID_READING')) {
+      const upper = text.toUpperCase();
+      if (upper.includes('NO_VALID_READING') || upper.includes('ACQUIRING')) {
         this.latestBpm = null;
         this.latestSpO2 = null;
         this.diagnostics.lastHeartbeat = null;

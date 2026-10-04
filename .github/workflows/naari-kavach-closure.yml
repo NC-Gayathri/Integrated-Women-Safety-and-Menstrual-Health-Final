@@ -14,12 +14,14 @@ on:
       - "android/**"
       - "ble-bridge/*.ps1"
       - "scripts/test_naari_*.py"
+      - "scripts/test_naari_*.cjs"
       - ".github/scripts/**"
       - "tests/naari_optical/**"
       - "tsconfig.naari-ci.json"
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
       - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
       - "documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md"
+      - "documentation/NAARI_KAVACH_VITALS_ACQUISITION.md"
       - "esp32-firmware/README.md"
       - ".github/workflows/naari-kavach-closure.yml"
       - ".github/workflows/naari-upload-recovery.yml"
@@ -44,6 +46,9 @@ jobs:
 
       - name: Execute optical fault and SOS regressions
         run: python3 scripts/test_naari_optical_behavior.py
+
+      - name: Execute sampled-signal and stale-reading regressions
+        run: python3 scripts/test_naari_vitals_behavior.py
 
       - name: Prove cleanup preserves concurrent branch updates
         run: python3 scripts/test_naari_branch_cleanup.py
@@ -77,7 +82,7 @@ jobs:
           grep -Fq '#define BLE_MTU             64' "$F"
           grep -Fq 'BLEDevice::setMTU(BLE_MTU)' "$F"
           grep -Fq 'sendSensorHealthSnapshot();' "$F"
-          grep -Fq '[FIRMWARE] mpu6500-ready-v3-20261004' "$F"
+          grep -Fq '[FIRMWARE] vitals-acquisition-v4-20261004' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"
@@ -164,6 +169,9 @@ jobs:
 
       - name: TypeScript check
         run: npx tsc --noEmit -p tsconfig.naari-ci.json
+
+      - name: Verify BLE vitals invalidation and SOS behavior
+        run: node scripts/test_naari_ble_vitals.cjs
 
   android-native:
     name: Android native BLE build

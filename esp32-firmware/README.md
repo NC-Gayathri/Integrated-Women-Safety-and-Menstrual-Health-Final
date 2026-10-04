@@ -11,12 +11,14 @@ from the repository's current default branch, `master`.
 The current Serial boot marker is:
 
 ```text
-[FIRMWARE] mpu6500-ready-v3-20261004
+[FIRMWARE] vitals-acquisition-v4-20261004
 ```
 
 This firmware keeps BLE and SOS available even when a sensor is unavailable, supports both MPU6050 (`WHO_AM_I=0x68`) and MPU6500 (`WHO_AM_I=0x70`) at I2C address `0x68` or `0x69`, and only reports the motion sensor READY after wake-state and ±2 g accelerometer configuration have been read back successfully.
 
-The repository regression suite exercises **33/33** bounded sensor/SOS behaviour cases. CI also compiles the real sketch for **DOIT ESP32 DEVKIT V1** with ESP32 Arduino core **3.3.12**. These software gates do not certify a physical USB cable, ROM-loader connection, flash operation or real sensor bus.
+The regression suite exercises **33 sensor/SOS cases and 18 signal-acquisition cases**, plus the phone's validity/SOS parser. CI also compiles the real sketch for **DOIT ESP32 DEVKIT V1** with ESP32 Arduino core **3.3.12**. These software gates do not certify a physical USB cable, ROM-loader connection, flash operation, real sensor bus or measurement accuracy.
+
+**Both sensors READY but `VITALS:NO_VALID_READING`?** Follow the [vitals acquisition guide](../documentation/NAARI_KAVACH_VITALS_ACQUISITION.md). This version preserves pulse history between beats, uses sample timing for buffered data, clears stale values, and prints `[SIGNAL]` raw red/IR values and the acquisition reason once per reporting interval. Update the phone app as well so `VITALS:ACQUIRING` clears old displayed readings.
 
 **Upload stuck at `Connecting...` / `No serial data received`?** Follow the [Windows/Arduino ESP32 upload recovery guide](../documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md). The verified helper is `../ble-bridge/flash_ble.ps1`; it requires an explicit port and proves ROM-loader communication with non-writing `read-mac` before it is allowed to write flash.
 
@@ -32,7 +34,7 @@ The repository also contains older or purpose-specific firmware variants. They a
 - **`esp32_firmware/esp32_firmware.ino`** — legacy BLE GATT firmware.
 - diagnostic/scanner sketches — intentionally narrow hardware-diagnostic programs.
 
-Do not flash a legacy binary when validating `mpu6500-ready-v3-20261004`.
+Do not flash a legacy binary when validating `vitals-acquisition-v4-20261004`.
 
 ---
 
