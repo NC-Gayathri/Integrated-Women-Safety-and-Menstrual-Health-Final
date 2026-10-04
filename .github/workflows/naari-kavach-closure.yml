@@ -12,6 +12,7 @@ on:
       - "services/BleService.ts"
       - "app/(tabs)/safety.tsx"
       - "android/**"
+      - "ble-bridge/*.ps1"
       - "scripts/test_naari_*.py"
       - ".github/scripts/**"
       - "tests/naari_optical/**"
@@ -21,6 +22,7 @@ on:
       - "documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md"
       - "esp32-firmware/README.md"
       - ".github/workflows/naari-kavach-closure.yml"
+      - ".github/workflows/naari-upload-recovery.yml"
   workflow_dispatch:
 
 permissions:
@@ -45,6 +47,9 @@ jobs:
 
       - name: Prove cleanup preserves concurrent branch updates
         run: python3 scripts/test_naari_branch_cleanup.py
+
+      - name: Verify physical upload recovery contract
+        run: python3 scripts/test_naari_upload_recovery.py
 
       - name: Enforce hardware and BLE invariants
         shell: bash
@@ -72,6 +77,7 @@ jobs:
           grep -Fq '#define BLE_MTU             64' "$F"
           grep -Fq 'BLEDevice::setMTU(BLE_MTU)' "$F"
           grep -Fq 'sendSensorHealthSnapshot();' "$F"
+          grep -Fq '[FIRMWARE] mpu6500-ready-v3-20261004' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"
@@ -205,37 +211,65 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify the merged PR 6 branch
+      - name: Verify merged NAARI repair branch
         id: verify
         uses: actions/github-script@v7
         with:
           result-encoding: string
           script: |
             const { owner, repo } = context.repo;
-            const repairBranch = 'fix/naari-kavach-mpu6500-compatibility';
-            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: 6 });
-            if (!pr.merged || pr.merge_commit_sha !== context.sha ||
-                pr.base.ref !== context.payload.repository.default_branch ||
-                pr.head.ref !== repairBranch || pr.head.repo?.full_name !== `${owner}/${repo}`) {
-              core.info('This push is not the verified merge of the repair branch; nothing to delete.');
+            const defaultBranch = context.payload.repository.default_branch;
+            const { data: base } = await github.rest.git.getRef({
+              owner, repo, ref: `heads/${defaultBranch}`
+            });
+            if (base.object.sha !== context.sha) {
+              throw new Error('Default branch moved; refuse stale cleanup.');
+            }
+
+            const { data: associated } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner, repo, commit_sha: context.sha
+            });
+            const candidates = associated.filter(pr =>
+              pr.merged_at &&
+              pr.merge_commit_sha === context.sha &&
+              pr.base.ref === defaultBranch &&
+              pr.head.repo?.full_name === `${owner}/${repo}` &&
+              pr.head.ref.startsWith('fix/naari-kavach-')
+            );
+
+            if (candidates.length === 0) {
+              core.info('No merged NAARI repair PR is associated with this push; nothing to delete.');
               return '';
             }
-            const { data: base } = await github.rest.git.getRef({ owner, repo, ref: `heads/${pr.base.ref}` });
-            if (base.object.sha !== context.sha) throw new Error('Default branch moved; refuse stale cleanup.');
+            if (candidates.length !== 1) {
+              throw new Error(`Expected exactly one merged NAARI repair PR; found ${candidates.length}.`);
+            }
+
+            const pr = candidates[0];
+            const repairBranch = pr.head.ref;
             let head;
             try {
-              ({ data: head } = await github.rest.git.getRef({ owner, repo, ref: `heads/${repairBranch}` }));
+              ({ data: head } = await github.rest.git.getRef({
+                owner, repo, ref: `heads/${repairBranch}`
+              }));
             } catch (error) {
-              if (error.status === 404) { core.info('Repair branch already deleted.'); return ''; }
+              if (error.status === 404) {
+                core.info('Verified repair branch already deleted.');
+                return '';
+              }
               throw error;
             }
-            if (head.object.sha !== pr.head.sha) throw new Error('Repair branch moved; preserve new work.');
+
+            if (head.object.sha !== pr.head.sha) {
+              throw new Error('Repair branch moved; preserve new work.');
+            }
             const { data: comparison } = await github.rest.repos.compareCommitsWithBasehead({
               owner, repo, basehead: `${head.object.sha}...${base.object.sha}`
             });
             if (!['ahead', 'identical'].includes(comparison.status)) {
               throw new Error('Repair head is not contained in the verified default branch.');
             }
+
             core.setOutput('branch', repairBranch);
             return head.object.sha;
 
@@ -244,41 +278,4 @@ jobs:
         env:
           REPAIR_BRANCH: ${{ steps.verify.outputs.branch }}
           REPAIR_HEAD: ${{ steps.verify.outputs.result }}
-        run: bash .github/scripts/delete-verified-repair-branch.sh
-
-      - name: Verify disposable RED-proof staging branch
-        id: verify-redproof
-        if: steps.verify.outputs.result != ''
-        uses: actions/github-script@v7
-        with:
-          result-encoding: string
-          script: |
-            const { owner, repo } = context.repo;
-            const stagingBranch = 'fix/naari-kavach-mpu6500-compatibility-redproof';
-            const expectedHead = '443587b9649401cad2c5a8f9b028765f3a2dac77';
-            const defaultBranch = context.payload.repository.default_branch;
-            const { data: base } = await github.rest.git.getRef({ owner, repo, ref: `heads/${defaultBranch}` });
-            if (base.object.sha !== context.sha) throw new Error('Default branch moved; refuse stale staging cleanup.');
-            let head;
-            try {
-              ({ data: head } = await github.rest.git.getRef({ owner, repo, ref: `heads/${stagingBranch}` }));
-            } catch (error) {
-              if (error.status === 404) { core.info('RED-proof staging branch already deleted.'); return ''; }
-              throw error;
-            }
-            if (head.object.sha !== expectedHead) throw new Error('RED-proof staging branch moved; preserve new work.');
-            const { data: comparison } = await github.rest.repos.compareCommitsWithBasehead({
-              owner, repo, basehead: `${head.object.sha}...${base.object.sha}`
-            });
-            if (!['ahead', 'identical'].includes(comparison.status)) {
-              throw new Error('RED-proof staging head is not contained in the verified default branch.');
-            }
-            core.setOutput('branch', stagingBranch);
-            return head.object.sha;
-
-      - name: Delete disposable RED-proof branch with exact lease
-        if: steps.verify-redproof.outputs.result != ''
-        env:
-          REPAIR_BRANCH: ${{ steps.verify-redproof.outputs.branch }}
-          REPAIR_HEAD: ${{ steps.verify-redproof.outputs.result }}
         run: bash .github/scripts/delete-verified-repair-branch.sh

@@ -1,0 +1,50 @@
+name: NAARI Physical Upload Recovery
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "ble-bridge/*.ps1"
+      - "documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md"
+      - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
+      - "esp32-firmware/README.md"
+      - "scripts/test_naari_upload_recovery.py"
+      - ".github/workflows/naari-kavach-closure.yml"
+      - ".github/workflows/naari-upload-recovery.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recovery-contract:
+    name: Upload recovery contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify fail-closed physical upload recovery
+        run: python3 scripts/test_naari_upload_recovery.py
+
+      - name: Parse PowerShell recovery helpers
+        shell: pwsh
+        run: |
+          $files = @(
+            'ble-bridge/flash_ble.ps1',
+            'ble-bridge/read_com5.ps1',
+            'ble-bridge/test_reset.ps1'
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "${file}: $($_.Message)" }
+              exit 1
+            }
+          }
+          Write-Host 'PowerShell recovery helper syntax PASS'

@@ -1,113 +1,151 @@
-# ESP32 upload recovery: no serial data received
+# ESP32 physical upload recovery — `No serial data received`
 
-## What the 3 October 2026 log proves
+## Current evidence — 4 October 2026
 
-The DOIT ESP32 DEVKIT V1 sketch compiled successfully with ESP32 core 3.3.12.
-The failure is at the serial connection stage, before this attempt writes firmware.
+The submitted Windows/Arduino log proves the **current dual-sensor sketch compiled and linked successfully** for `esp32:esp32:esp32doit-devkit-v1` using ESP32 Arduino core **3.3.12**. Image generation also completed and a 4 MB merged image was produced.
 
-| Log evidence | Meaning |
-|---|---|
-| Sketch uses 1,129,287 / 1,310,720 bytes (86%) | Program fits the selected partition |
-| Global variables use 42,892 / 327,680 bytes (13%) | Static RAM allocation fits |
-| ESP32 images created successfully | Compile/link/image generation completed |
-| COM5, Connecting..., no serial data received, exit status 2 | esptool could not communicate with the ROM download loader |
-
-Cached compile messages are informational. This log does not show a sensor
-initialization failure and does not prove the new firmware reached the board.
-It cannot distinguish a reset/download-mode problem from an incorrect port,
-USB/serial connection, or power problem.
-
-## First recovery attempt in Arduino IDE
-
-1. Close Serial Monitor, Serial Plotter and any other terminal using this board.
-2. Select **DOIT ESP32 DEVKIT V1** and keep ESP32 core **3.3.12**. In
-   **Tools > Port**, select the port belonging to this physical ESP32. The
-   reported attempt used **COM5**, but the number can change after reconnection.
-3. If the board menu exposes **Upload Speed**, select **115200** for this retry.
-   Leave the partition scheme unchanged: the supplied image already fits.
-4. Locate the ESP32 board's **BOOT** (sometimes FLASH) and **EN/RESET** buttons.
-   BOOT is the onboard GPIO0 button, not the project's external GPIO4 SOS button.
-5. Press and hold **BOOT**. While holding it, briefly press and release
-   **EN/RESET**. Keep BOOT held.
-6. Click **Upload**. Keep holding BOOT through compilation and the
-   `Connecting...` phase. Release BOOT once esptool identifies the ESP32 and
-   writing progress starts.
-7. Wait for the upload to finish successfully. With BOOT released, tap
-   **EN/RESET** to start the application if it does not start automatically.
-8. Open Serial Monitor at **115200 baud**. With BOOT released, tap **EN/RESET**
-   and capture the boot output from this reset. Confirm:
+The attempt then failed at the serial-loader boundary on the selected Windows port with:
 
 ```text
-[FIRMWARE] optical-ready-v2-20260930
+Serial port ...
+Connecting......................................
+A fatal error occurred: Failed to connect to ESP32: No serial data received.
+Failed uploading: uploading error: exit status 2
 ```
 
-Then check for the separate optical sensor READY event in the
-[optical acceptance guide](NAARI_KAVACH_OPTICAL_READY_REPAIR.md).
-The BLE/SOS startup message alone is not optical acceptance.
+That failure happens **before the new application firmware can run**. It does not show an MPU6500, MAX3010x, BLE or SOS firmware failure. It also does not prove that the repaired firmware reached the physical ESP32.
 
-Holding GPIO0 low during reset selects the ROM serial download loader. This
-manual sequence addresses failed automatic bootloader entry; it cannot repair
-a broken cable, unpowered board or failed USB-to-serial interface.
+The current acceptance marker is:
 
-## If there is still no response
+```text
+[FIRMWARE] mpu6500-ready-v3-20261004
+```
 
-Follow these checks in order. Change wiring only with USB and other power removed.
+Any older firmware marker is stale and must not be used as physical acceptance evidence.
 
-1. **Confirm the port.** In Windows Device Manager, expand **Ports (COM & LPT)**.
-   Unplug the ESP32 and see which device disappears; reconnect it and see which
-   returns. Select that port in Arduino IDE. If no port appears, try a known
-   working USB data cable and a direct computer USB port. A power LED alone does
-   not prove that the cable has working data wires. Check the USB-serial device's
-   driver if Windows shows an unknown device; use its manufacturer's driver.
-2. **Isolate the board.** With power disconnected, temporarily remove the sensor,
-   button and other external wiring, then retry the BOOT/EN upload with only the
-   ESP32 and USB attached. External wiring can interfere with power or boot pins.
-   On the classic ESP32, GPIO2 must be floating or low for download mode; GPIO12
-   held high can select the wrong flash voltage. Keep the board's own components
-   intact. Reconnect the approved project wiring only after disconnecting power.
-3. **Check the serial path without writing flash.** Close Serial Monitor again.
-   Manually enter download mode as above, then run the optional PowerShell check
-   below. It uses the esptool installation shown in the submitted log. Replace
-   COM5 if the port check found a different port.
+## Why the repository flash helper was repaired
+
+The previous `ble-bridge/flash_ble.ps1` was unsafe for this repair because it fixed the port and high upload rate in the script and pointed to a **legacy BLE firmware binary**, not the verified `naari_kavach_dual_sensor_ble_test` sketch.
+
+The repaired helper is fail-closed:
+
+1. The caller must explicitly select the Windows COM port.
+2. It verifies that the port currently exists.
+3. It compiles exactly `esp32-firmware/naari_kavach_dual_sensor_ble_test` for the DOIT ESP32 DEVKIT V1 target.
+4. It requires manual ROM-download-mode entry.
+5. It runs a non-writing `read-mac` preflight at **115200 baud**.
+6. **No flash write is attempted if that preflight fails.**
+7. Only after the ROM loader responds does it write the freshly compiled merged image.
+8. Physical acceptance still requires the current firmware marker after reset.
+
+## Canonical recovery procedure
+
+### 1. Identify the actual port
+
+Close Arduino Serial Monitor, Serial Plotter and any other terminal using the ESP32.
+
+In **Windows Device Manager > Ports (COM & LPT)**:
+
+- note the visible ports;
+- unplug the ESP32 and identify which port disappears;
+- reconnect it and identify which port returns.
+
+Use that port. The number can change after reconnecting the board, changing the USB socket, changing a cable, or reinstalling a USB-serial driver.
+
+A power LED does **not** prove that the USB cable carries data.
+
+### 2. First run the verified helper
+
+From the repository root, substitute the port identified above:
 
 ```powershell
-$naariEsptool = Join-Path $env:LOCALAPPDATA 'Arduino15\packages\esp32\tools\esptool_py\5.3.1\esptool.exe'
-if (-not (Test-Path -LiteralPath $naariEsptool)) { throw 'esptool 5.3.1 was not found at the path used by the supplied log.' }
-& $naariEsptool --chip esp32 --port COM5 --baud 115200 --before no-reset --after no-reset read-mac
+powershell -ExecutionPolicy Bypass -File .\ble-bridge\flash_ble.ps1 -Port COM5
 ```
 
-`read-mac` reads the chip identity and does not write or erase flash. `no-reset`
-preserves the manually selected download mode. If it prints the ESP32 identity
-and MAC successfully, the serial/download path works in that test: retry Arduino
-Upload with BOOT held during reset. After the diagnostic, release BOOT and tap
-EN/RESET to run the application. If communication still fails, one diagnostic
-retry at `--baud 9600` can help separate baud/noise problems; it is not a firmware
-repair.
+`COM5` above is only an example argument. The script itself does not assume that port.
 
-4. **Record what the board sends.** Open Serial Monitor at 115200, leave BOOT
-   released, and tap EN/RESET. Save the complete output (or explicitly record
-   that it remains blank). Also record the Device Manager port/device name and
-   whether a different data cable/direct USB port changed the result. A board
-   that remains silent through these checks needs local power/USB/board diagnosis.
+The helper uses **115200 baud** by default for recovery. Do not increase the rate while diagnosing `No serial data received`.
 
-## Acceptance and closure
+### 3. Enter ROM download mode when prompted
 
-| Gate | Required evidence | Status from the submitted log |
+When the helper asks:
+
+1. Locate the ESP32 board's **BOOT** (sometimes FLASH) button and **EN/RESET** button.
+2. **BOOT is GPIO0**, not the project's external GPIO4 SOS button.
+3. Press and hold **BOOT**.
+4. While holding BOOT, briefly press and release **EN/RESET**.
+5. Keep BOOT held.
+6. Press Enter in the PowerShell helper.
+
+The helper now executes a non-writing loader check equivalent to:
+
+```text
+esptool --chip esp32 --port <selected-port> --baud 115200 --before no-reset --after no-reset read-mac
+```
+
+If the chip identity/MAC cannot be read, the script terminates and states that **no flash was written**.
+
+### 4. If `read-mac` still receives no serial data
+
+Do these in order, changing wiring only while all power is disconnected:
+
+1. **Port:** repeat the unplug/replug Device Manager test. Do not assume a previously used port number is still correct.
+2. **Port ownership:** close Arduino Serial Monitor/Plotter, VS Code serial terminals, Python serial readers and other processes that may own the port.
+3. **USB cable:** use a known-good USB **data** cable.
+4. **USB path:** connect directly to the computer rather than through an unpowered or unreliable hub.
+5. **Power:** verify the ESP32 is stably powered.
+6. **External wiring isolation:** disconnect sensor/button wiring temporarily and retry with only ESP32 + USB. External circuits can disturb boot straps, reset or supply rails.
+7. **Manual BOOT/EN sequence:** repeat it carefully. Automatic DTR/RTS reset is not treated as proof that the board actually entered the ROM loader.
+8. **USB-serial driver:** if Windows shows an unknown device or no port, install/repair the driver appropriate to the board's USB-to-serial chip.
+9. **Diagnostic baud only:** if the path remains noisy, a one-off `read-mac` diagnostic at 9600 can help distinguish link-quality issues. It is not a firmware fix.
+
+If a known-good data cable, direct USB port, correct Windows port, manual BOOT/EN sequence and isolated board still cannot return a ROM-loader identity, the remaining problem is local to the physical USB/serial/reset/power/board path. Repository code cannot make a host receive bytes from a board that is not entering or exposing its ROM loader.
+
+## After a successful flash
+
+Release BOOT. If the application does not start automatically, tap EN/RESET once.
+
+Then run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\ble-bridge\read_com5.ps1 -Port COM5
+```
+
+Again, substitute the actual verified port. The historical filename is retained for compatibility; the script itself is now port-parameterized.
+
+With BOOT released, tap EN/RESET. Physical boot acceptance requires:
+
+```text
+[FIRMWARE] mpu6500-ready-v3-20261004
+```
+
+For the reported motion device, MPU acceptance then requires the current firmware to identify and configure the part, for example:
+
+```text
+[MPU] MPU6500 ready at 0x68 (WHO_AM_I=0x70, accel=+/-2g).
+[EVENT] SENSOR:MPU6500:READY
+```
+
+The optical device is a **separate gate**. Do not convert `SENSOR:MAX3010X:NOT_READY` into a motion-sensor failure or claim the optical sensor passed because BLE/SOS started.
+
+## Formal acceptance matrix
+
+| Gate | Required evidence | Current status from the supplied 4 Oct log |
 |---|---|---|
-| Firmware compilation | Successful compile and image generation | Passed |
-| ROM loader connection | ESP32 identity received on the verified port | Failed in this attempt |
-| Upload | Flash writing and verification finish successfully | Not reached |
-| Correct firmware boot | Firmware version marker after reset | Not supplied |
-| Sensor readiness and SOS | Physical tests in the existing acceptance plan | Still pending |
+| Correct target/core selected | DOIT ESP32 DEVKIT V1 / core 3.3.12 | **PASS** |
+| Compile/link/image generation | Successful ESP32 image + merged image | **PASS** |
+| Program/RAM fit | Build completes within configured limits | **PASS** |
+| ROM loader connection | ESP32 responds to verified-port `read-mac` | **FAIL / not established** |
+| Flash write | esptool write completes successfully | **NOT REACHED** |
+| Correct firmware boot | Current firmware marker after reset | **NOT ESTABLISHED** |
+| MPU6500 physical readiness | `WHO_AM_I=0x70`, verified config, READY event | **NOT ESTABLISHED on this upload attempt** |
+| MAX3010x physical readiness | chip-specific optical READY | **SEPARATE / NOT ESTABLISHED here** |
+| SOS physical behavior | three-click SOS observed on real board | **NOT ESTABLISHED here** |
 
-Repository CI verifies software builds and regression tests. It does not operate
-the owner's USB cable, buttons or Windows COM port. Do not mark the upload or
-sensor issue physically closed until the successful upload and boot evidence
-have been captured. A merge or a branch deletion does not satisfy those gates.
+Repository CI can prove source-level contracts, host regressions and compilation. It cannot press the board's BOOT/EN buttons, replace a USB cable, select a Windows device, or observe the physical sensor bus. **Do not mark physical hardware closed until the upload, current boot marker and required real-board sensor/SOS evidence have been captured.**
 
 ## Primary references
 
-- [Espressif: troubleshooting, including no serial data received](https://docs.espressif.com/projects/esptool/en/latest/esp32/troubleshooting.html)
-- [Espressif: boot mode selection and manual BOOT/EN sequence](https://docs.espressif.com/projects/esptool/en/latest/esp32/advanced-topics/boot-mode-selection.html)
-- [Espressif: read-mac command](https://docs.espressif.com/projects/esptool/en/latest/esp32/esptool/basic-commands.html#read-built-in-mac-address-read-mac)
-- [Espressif: reset options](https://docs.espressif.com/projects/esptool/en/latest/esp32/esptool/advanced-options.html)
+- Espressif esptool troubleshooting — `No serial data received`, port, power, bootloader and lower-baud diagnostics.
+- Espressif ESP32 boot-mode selection — GPIO0 / BOOT and reset behaviour.
+- Espressif esptool basic commands — non-writing `read-mac` and flash operations.
