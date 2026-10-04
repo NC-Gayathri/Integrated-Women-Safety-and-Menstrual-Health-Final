@@ -21,7 +21,7 @@ The current acceptance marker is:
 [FIRMWARE] mpu6500-ready-v3-20261004
 ```
 
-Anything that still asks for `optical-ready-v2-20260930` is stale and must not be used as physical acceptance evidence.
+Any older firmware marker is stale and must not be used as physical acceptance evidence.
 
 ## Why the repository flash helper was repaired
 
