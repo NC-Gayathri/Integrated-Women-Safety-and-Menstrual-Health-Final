@@ -850,24 +850,30 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
       previousIrAc > peakThreshold) {
     peakArmed = false; // At most one candidate per positive half-wave.
 
-    if (lastPeakAt == 0 || now - lastPeakAt >= 300) {
-      if (lastPeakAt != 0) {
-        unsigned long interval = now - lastPeakAt;
-
-        // 30-200 BPM sanity range for prototype filtering.
-        if (interval >= 300 && interval <= 2000) {
-          float bpm = 60000.0f / (float)interval;
-
-          if (filteredBpm <= 0.0f) {
-            filteredBpm = bpm;
-          } else {
-            filteredBpm = 0.75f * filteredBpm + 0.25f * bpm;
-          }
-
-          heartRateValid = filteredBpm >= 30.0f && filteredBpm <= 200.0f;
-        }
-      }
+    if (lastPeakAt == 0) {
       lastPeakAt = now;
+    } else {
+      const unsigned long interval = now - lastPeakAt;
+
+      // A candidate above the supported 200 BPM ceiling is evidence that the
+      // current timing chain is invalid. Do not retain the older timestamp:
+      // doing so lets every second fast peak alias into a slower valid rate.
+      if (interval < 300) {
+        invalidateVitalEstimates();
+      } else {
+        // 30-200 BPM sanity range for prototype filtering. Intervals above
+        // 2000 ms are already expired by the check immediately above.
+        float bpm = 60000.0f / (float)interval;
+
+        if (filteredBpm <= 0.0f) {
+          filteredBpm = bpm;
+        } else {
+          filteredBpm = 0.75f * filteredBpm + 0.25f * bpm;
+        }
+
+        heartRateValid = filteredBpm >= 30.0f && filteredBpm <= 200.0f;
+        lastPeakAt = now;
+      }
     }
   }
 
