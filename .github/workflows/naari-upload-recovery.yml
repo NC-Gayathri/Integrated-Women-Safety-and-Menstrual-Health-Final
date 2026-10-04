@@ -1,0 +1,26 @@
+name: NAARI Physical Upload Recovery
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - "ble-bridge/*.ps1"
+      - "documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md"
+      - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
+      - "esp32-firmware/README.md"
+      - "scripts/test_naari_upload_recovery.py"
+      - ".github/workflows/naari-kavach-closure.yml"
+      - ".github/workflows/naari-upload-recovery.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recovery-contract:
+    name: Upload recovery contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify fail-closed physical upload recovery
+        run: python3 scripts/test_naari_upload_recovery.py
