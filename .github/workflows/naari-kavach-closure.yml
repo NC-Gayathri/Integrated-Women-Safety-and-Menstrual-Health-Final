@@ -205,15 +205,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Verify the merged PR 4 branch
+      - name: Verify the merged PR 5 branch
         id: verify
         uses: actions/github-script@v7
         with:
           result-encoding: string
           script: |
             const { owner, repo } = context.repo;
-            const repairBranch = 'fix/naari-kavach-upload-recovery';
-            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: 4 });
+            const repairBranch = 'fix/naari-kavach-mpu6500-compatibility';
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: 5 });
             if (!pr.merged || pr.merge_commit_sha !== context.sha ||
                 pr.base.ref !== context.payload.repository.default_branch ||
                 pr.head.ref !== repairBranch || pr.head.repo?.full_name !== `${owner}/${repo}`) {

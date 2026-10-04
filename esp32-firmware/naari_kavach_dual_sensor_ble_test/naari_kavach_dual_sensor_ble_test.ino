@@ -8,7 +8,7 @@
  *   SOS button: GPIO 4 -> GND, INPUT_PULLUP
  *   Built-in LED: GPIO 2
  *   I2C: SDA GPIO 21, SCL GPIO 22, 100 kHz
- *   GY-521 / MPU6050: normally 0x68 (0x69 if AD0 is HIGH)
+ *   GY-521 / MPU6050 or MPU6500: normally 0x68 (0x69 if AD0 is HIGH)
  *   MAX3010x optical sensor: 0x57
  *
  * Optical sensor identification:
@@ -63,6 +63,16 @@ bool oldDeviceConnected = false;
 #define MAX3010X_ADDR 0x57
 #define MPU6050_ADDR_LOW  0x68
 #define MPU6050_ADDR_HIGH 0x69
+
+#define MPU_REG_ACCEL_XOUT_H 0x3B
+#define MPU_REG_ACCEL_CONFIG 0x1C
+#define MPU_REG_PWR_MGMT_1   0x6B
+#define MPU_REG_WHO_AM_I     0x75
+#define MPU6050_WHO_AM_I     0x68
+#define MPU6500_WHO_AM_I     0x70
+#define MPU_PWR_SLEEP_BIT    0x40
+#define MPU_ACCEL_FS_MASK    0x18
+#define MPU_ACCEL_FS_2G      0x00
 
 // -----------------------------------------------------------------------------
 // Timing
@@ -266,13 +276,28 @@ void updateButtonState() {
 }
 
 // -----------------------------------------------------------------------------
-// MPU6050 / GY-521
+// MPU6050 / MPU6500 motion sensor
 // -----------------------------------------------------------------------------
 uint8_t mpuAddr = 0;
+uint8_t mpuWhoAmI = 0;
 bool mpuReady = false;
 unsigned long lastMpuSample = 0;
 unsigned long lastMpuRetry = 0;
 uint8_t mpuConsecutiveErrors = 0;
+
+const char* mpuChipNameForIdentity(uint8_t whoAmI) {
+  if (whoAmI == MPU6050_WHO_AM_I) return "MPU6050";
+  if (whoAmI == MPU6500_WHO_AM_I) return "MPU6500";
+  return "MPU";
+}
+
+const char* mpuChipName() {
+  return mpuChipNameForIdentity(mpuWhoAmI);
+}
+
+bool isSupportedMpuIdentity(uint8_t whoAmI) {
+  return whoAmI == MPU6050_WHO_AM_I || whoAmI == MPU6500_WHO_AM_I;
+}
 
 enum FallState {
   FALL_IDLE,
@@ -286,25 +311,62 @@ unsigned long impactStartedAt = 0;
 unsigned long lastFallTriggeredAt = 0;
 
 bool initializeMpuAt(uint8_t addr) {
+  // READY is fail-closed: every attempt must re-prove identity and configuration.
+  mpuReady = false;
+  mpuAddr = 0;
+  mpuWhoAmI = 0;
+
   if (!probeAddress(addr)) return false;
 
   uint8_t whoAmI = 0;
-  if (!readRegister8(addr, 0x75, whoAmI)) return false;
+  if (!readRegister8(addr, MPU_REG_WHO_AM_I, whoAmI)) return false;
 
-  // MPU6050 normally returns 0x68.
-  if (whoAmI != 0x68) {
-    Serial.printf("[MPU] Address 0x%02X responded but WHO_AM_I=0x%02X.\n", addr, whoAmI);
+  if (!isSupportedMpuIdentity(whoAmI)) {
+    Serial.printf("[MPU] Address 0x%02X responded but unsupported WHO_AM_I=0x%02X.\n",
+                  addr, whoAmI);
     return false;
   }
 
-  if (!writeRegister8(addr, 0x6B, 0x00)) return false; // Wake up.
+  const char* chipName = mpuChipNameForIdentity(whoAmI);
+
+  // Wake the device, then prove that the SLEEP bit actually cleared.
+  if (!writeRegister8(addr, MPU_REG_PWR_MGMT_1, 0x00)) {
+    Serial.printf("[MPU] %s wake write failed at 0x%02X.\n", chipName, addr);
+    return false;
+  }
+
+  uint8_t powerManagement = 0xFF;
+  if (!readRegister8(addr, MPU_REG_PWR_MGMT_1, powerManagement) ||
+      (powerManagement & MPU_PWR_SLEEP_BIT) != 0) {
+    Serial.printf("[MPU] %s wake read-back failed at 0x%02X (PWR_MGMT_1=0x%02X).\n",
+                  chipName, addr, powerManagement);
+    return false;
+  }
+
+  // Fall detection converts raw acceleration using 16384 LSB/g, which is valid
+  // for the +/-2 g setting. Force that range and verify it before READY.
+  if (!writeRegister8(addr, MPU_REG_ACCEL_CONFIG, MPU_ACCEL_FS_2G)) {
+    Serial.printf("[MPU] %s accelerometer configuration write failed at 0x%02X.\n",
+                  chipName, addr);
+    return false;
+  }
+
+  uint8_t accelConfig = 0xFF;
+  if (!readRegister8(addr, MPU_REG_ACCEL_CONFIG, accelConfig) ||
+      (accelConfig & MPU_ACCEL_FS_MASK) != MPU_ACCEL_FS_2G) {
+    Serial.printf("[MPU] %s accelerometer read-back failed at 0x%02X (ACCEL_CONFIG=0x%02X).\n",
+                  chipName, addr, accelConfig);
+    return false;
+  }
 
   mpuAddr = addr;
+  mpuWhoAmI = whoAmI;
   mpuReady = true;
   mpuConsecutiveErrors = 0;
 
-  Serial.printf("[MPU] GY-521/MPU6050 ready at 0x%02X.\n", addr);
-  sendBleEvent("SENSOR:MPU6050:READY");
+  Serial.printf("[MPU] %s ready at 0x%02X (WHO_AM_I=0x%02X, accel=+/-2g).\n",
+                chipName, addr, whoAmI);
+  sendBleEvent(String("SENSOR:") + chipName + ":READY");
   return true;
 }
 
@@ -314,7 +376,8 @@ void tryInitializeMpu() {
 
   mpuReady = false;
   mpuAddr = 0;
-  Serial.println("[MPU] Not detected at 0x68 or 0x69.");
+  mpuWhoAmI = 0;
+  Serial.println("[MPU] Supported MPU6050/MPU6500 not detected at 0x68 or 0x69.");
 }
 
 void updateMpuFallDetection() {
@@ -332,12 +395,13 @@ void updateMpuFallDetection() {
   lastMpuSample = now;
 
   uint8_t raw[6];
-  if (!readBytes(mpuAddr, 0x3B, raw, sizeof(raw))) {
+  if (!readBytes(mpuAddr, MPU_REG_ACCEL_XOUT_H, raw, sizeof(raw))) {
     if (++mpuConsecutiveErrors >= 3) {
+      const char* failedChip = mpuChipName();
       mpuReady = false;
       mpuConsecutiveErrors = 0;
-      Serial.println("[MPU] I2C failures; sensor marked unavailable.");
-      sendBleEvent("SENSOR:MPU6050:I2C_ERROR");
+      Serial.printf("[MPU] %s I2C failures; sensor marked unavailable.\n", failedChip);
+      sendBleEvent(String("SENSOR:") + failedChip + ":I2C_ERROR");
     }
     return;
   }
@@ -718,7 +782,6 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
       previousSlopePositive &&
       !slopePositive &&
       previousIrAc > peakThreshold) {
-
     unsigned long now = millis();
 
     if (lastPeakAt != 0) {
@@ -898,7 +961,13 @@ void updateOpticalSensor() {
 }
 
 void sendSensorHealthSnapshot() {
-  sendBleEvent(mpuReady ? "SENSOR:MPU6050:READY" : "SENSOR:MPU6050:NOT_READY");
+  if (mpuReady) {
+    sendBleEvent(String("SENSOR:") + mpuChipName() + ":READY");
+  } else if (isSupportedMpuIdentity(mpuWhoAmI)) {
+    sendBleEvent(String("SENSOR:") + mpuChipName() + ":NOT_READY");
+  } else {
+    sendBleEvent("SENSOR:MPU:NOT_READY");
+  }
 
   if (opticalReady) {
     sendBleEvent(String("SENSOR:") + opticalChipName() + ":READY");
@@ -927,7 +996,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
-  Serial.println("[FIRMWARE] optical-ready-v2-20260930");
+  Serial.println("[FIRMWARE] mpu6500-ready-v3-20261004");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
