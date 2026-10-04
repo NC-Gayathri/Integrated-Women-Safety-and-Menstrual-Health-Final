@@ -1,97 +1,49 @@
 # ESP32 firmware
 
-## Current optical-sensor READY repair (30 September 2026)
+## Current NAARI KAVACH dual-sensor BLE firmware — 4 October 2026
 
-For the MAX30100/MAX30102 identified-but-not-ready problem, flash
+For the current BLE/SOS + motion + optical integration, flash:
+
 [`naari_kavach_dual_sensor_ble_test/naari_kavach_dual_sensor_ble_test.ino`](naari_kavach_dual_sensor_ble_test/naari_kavach_dual_sensor_ble_test.ino)
+
 from the repository's current default branch, `master`.
-The Wi-Fi and legacy BLE sketches below do **not** contain this repair.
 
-Follow the [READY repair and acceptance guide](../documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md).
-The Serial boot marker must be `[FIRMWARE] optical-ready-v2-20260930`.
-Compilation/host tests do not certify that a physical sensor works.
+The current Serial boot marker is:
 
-**Upload stuck at `Connecting...` / `No serial data received`?** Follow the
-[Windows/Arduino ESP32 upload recovery guide](../documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md)
-for the BOOT/EN sequence and port checks. The 3 October log compiled successfully;
-the failure happened before the upload could start.
+```text
+[FIRMWARE] mpu6500-ready-v3-20261004
+```
+
+This firmware keeps BLE and SOS available even when a sensor is unavailable, supports both MPU6050 (`WHO_AM_I=0x68`) and MPU6500 (`WHO_AM_I=0x70`) at I2C address `0x68` or `0x69`, and only reports the motion sensor READY after wake-state and ±2 g accelerometer configuration have been read back successfully.
+
+The repository regression suite exercises **33/33** bounded sensor/SOS behaviour cases. CI also compiles the real sketch for **DOIT ESP32 DEVKIT V1** with ESP32 Arduino core **3.3.12**. These software gates do not certify a physical USB cable, ROM-loader connection, flash operation or real sensor bus.
+
+**Upload stuck at `Connecting...` / `No serial data received`?** Follow the [Windows/Arduino ESP32 upload recovery guide](../documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md). The verified helper is `../ble-bridge/flash_ble.ps1`; it requires an explicit port and proves ROM-loader communication with non-writing `read-mac` before it is allowed to write flash.
+
+After a successful physical flash, the current marker above must be captured from the board at 115200 baud before claiming that this firmware is actually running.
+
+For optical acceptance, continue with the [optical READY repair and acceptance guide](../documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md). Motion-sensor READY, optical READY and SOS operation are separate physical evidence gates.
 
 ## Other firmware variants
 
-This directory contains the production-grade Arduino C++ firmware for the **Naari Kavach** Wi-Fi IoT emergency safety wearable.
+The repository also contains older or purpose-specific firmware variants. They are **not substitutes for the current dual-sensor acceptance sketch** above.
+
+- **`esp32_wifi_firmware/esp32_wifi_firmware.ino`** — Wi-Fi based SOS firmware that sends backend events over HTTP.
+- **`esp32_firmware/esp32_firmware.ino`** — legacy BLE GATT firmware.
+- diagnostic/scanner sketches — intentionally narrow hardware-diagnostic programs.
+
+Do not flash a legacy binary when validating `mpu6500-ready-v3-20261004`.
 
 ---
 
-## 1. Directory Structure
+## Wi-Fi SOS variant reference
 
-- **`esp32_wifi_firmware/esp32_wifi_firmware.ino`**: **(Recommended)** Wi-Fi-based physical SOS button firmware that sends emergency alerts directly to the backend API (`POST /api/v1/iot/events`) over Wi-Fi with automatic reconnection and safe retry deduplication.
-- **`esp32_firmware/esp32_firmware.ino`**: Legacy BLE GATT server firmware.
-
----
-
-## 2. Hardware Wiring (Wi-Fi SOS Button)
+The following wiring applies to the separate Wi-Fi SOS firmware, not to the dual-sensor acceptance claim.
 
 | Component | Component Pin | ESP32 GPIO Pin | Description |
 | :--- | :--- | :--- | :--- |
-| **Physical Push Button** | Terminal 1 | **GPIO 4** | Configured with internal pull-up (`INPUT_PULLUP`). |
-| **Physical Push Button** | Terminal 2 | **GND** | Connects to GND when pressed. |
-| **Built-in Status LED** | Internal | **GPIO 2** | Indicates Wi-Fi connection and SOS transmission. |
+| Physical Push Button | Terminal 1 | GPIO 4 | Configured with internal pull-up (`INPUT_PULLUP`) |
+| Physical Push Button | Terminal 2 | GND | Connects to GND when pressed |
+| Built-in Status LED | Internal | GPIO 2 | Status indication |
 
----
-
-## 3. Configuration Before Flashing
-
-Open `esp32_wifi_firmware/esp32_wifi_firmware.ino` in Arduino IDE and update the configuration:
-
-```cpp
-// 1. Wi-Fi Credentials (or Mobile Hotspot)
-const char* WIFI_SSID     = "Your_WiFi_SSID";
-const char* WIFI_PASSWORD = "Your_WiFi_Password";
-
-// 2. Laptop Local LAN Backend URL (Port 5000)
-// Replace with your laptop's IPv4 address from 'ipconfig' (e.g., "192.168.1.100")
-const char* BACKEND_SERVER_URL = "http://192.168.1.100:5000/api/v1/iot/events";
-
-// 3. Device Credentials (matches IOT_DEFAULT_DEVICE_API_KEY in server/.env)
-const char* DEVICE_ID     = "cc:7b:5c:fb:d9:18";
-const char* DEVICE_API_KEY= "nk_sec_dev_2026_9e38e_7b4c91a0ef62";
-```
-
----
-
-## 4. Flashing to ESP32
-
-1. Connect the ESP32 to your computer via USB data cable.
-2. In Arduino IDE:
-   - Select **Tools > Board > ESP32 Arduino > DOIT ESP32 DEVKIT V1** (or your ESP32 board).
-   - Select **Tools > Port** and choose your ESP32 COM port (e.g. `COM3`, `COM4`).
-3. Click **Upload**.
-4. Open the **Serial Monitor** at baud rate **115200** to view Wi-Fi connection logs and SOS transmission events.
-
----
-
-## 5. Wi-Fi SOS Button Logic & Diagnostics
-
-1. **Wi-Fi Connection & Auto-Reconnect**:
-   - ESP32 connects to the configured Wi-Fi network and displays assigned IP and signal strength (RSSI).
-   - If Wi-Fi link drops, the firmware automatically initiates reconnection every 5 seconds.
-2. **Debounced SOS Button Detection**:
-   - Monitors GPIO 4 with a 50ms hardware debounce.
-   - Detects 3 quick button clicks within 1.8 seconds (prevents accidental pocket triggers). Can be set to 1 click if desired via `REQUIRED_CLICKS`.
-3. **Direct HTTP POST Ingestion**:
-   - Sends HTTP POST directly to `http://<LAN_IP>:5000/api/v1/iot/events`.
-   - Minimal payload:
-     ```json
-     {
-       "deviceId": "cc:7b:5c:fb:d9:18",
-       "apiKey": "nk_sec_dev_2026_9e38e_7b4c91a0ef62",
-       "eventId": "cc:7b:5c:fb:d9:18_BTN_1725000000_1",
-       "eventType": "BUTTON_SOS"
-     }
-     ```
-4. **Safe Retry & Idempotency**:
-   - If the server is temporarily unreachable or the network drops, the event is saved in a retry queue with its original `eventId`.
-   - Once reconnected, the event is sent with the exact same `eventId`, ensuring the backend deduplicates it without creating duplicate database records.
-5. **Serial Monitor Diagnostics**:
-   - Logs HTTP status codes: `200` (Success / Deduplicated), `401` (Unauthorized API Key), `403` (Unpaired Device), `404` (Unregistered Device), and network errors.
-
+To use the Wi-Fi variant, configure its Wi-Fi/backend/device credentials in that sketch, choose the correct ESP32 board and actual COM port, upload it, and inspect its own Serial output. Its runtime/network behaviour is outside the current dual-sensor BLE acceptance gate.
