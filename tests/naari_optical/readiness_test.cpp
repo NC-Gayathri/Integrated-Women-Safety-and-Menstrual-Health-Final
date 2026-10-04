@@ -168,11 +168,16 @@ int main(int argc, char** argv) {
               "reconnection must restore an MPU6500 READY event");
     } else if (name == "mpu6500_sos_during_init") {
       Wire.enableMpu(0x70);
-      Wire.operationMs = 50;
-      buttonEdges = {{100, LOW}, {280, HIGH}, {400, LOW}, {580, HIGH}, {700, LOW}, {880, HIGH}};
-      require(initializeMpuAt(0x68), "slow healthy MPU6500 initialization must finish");
+      // Stretch a healthy-but-retried initialization without altering production
+      // code. Each first repeated-start read fails, then the bounded STOP retry
+      // succeeds; 60 ms operations make the window long enough for 3 clicks.
+      Wire.operationMs = 60;
+      Wire.failRepeatedStart = true;
+      buttonEdges = {{50, LOW}, {150, HIGH}, {270, LOW}, {390, HIGH}, {510, LOW}, {630, HIGH}};
+      require(initializeMpuAt(0x68), "slow recovered MPU6500 initialization must finish");
       require(Serial.output.find("[EVENT] SOS\n") != std::string::npos,
               "three debounced clicks during MPU initialization must emit SOS");
+      require(millis() < 1000, "slow recovered MPU initialization must remain bounded");
     } else throw std::runtime_error("unknown test case");
     std::cout << "PASS " << name << '\n';
     return 0;
