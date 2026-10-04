@@ -1,37 +1,53 @@
-$port = New-Object System.IO.Ports.SerialPort 'COM5', 115200, 'None', 8, 'One'
-$port.ReadTimeout = 1000
-$port.Open()
+param(
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^COM\d+$')]
+    [string]$Port
+)
 
-Write-Output "Testing bootloader reset sequence..."
+$ErrorActionPreference = 'Stop'
+$serial = $null
 
-# Sequence 1: DTR=0, RTS=0
-$port.DtrEnable = $false
-$port.RtsEnable = $false
-Start-Sleep -Milliseconds 100
-
-# Pull EN down and IO0 down: DTR=1, RTS=1
-$port.DtrEnable = $true
-$port.RtsEnable = $true
-Start-Sleep -Milliseconds 250
-
-# Release EN (DTR=0) while keeping IO0 down (RTS=1)
-$port.DtrEnable = $false
-$port.RtsEnable = $true
-Start-Sleep -Milliseconds 500
-
-# Release IO0
-$port.DtrEnable = $false
-$port.RtsEnable = $false
-Start-Sleep -Milliseconds 100
-
-$output = ""
-$end = (Get-Date).AddSeconds(2)
-while ((Get-Date) -lt $end) {
-    if ($port.BytesToRead -gt 0) {
-        $output += $port.ReadExisting()
-    }
-    Start-Sleep -Milliseconds 50
+$ports = @([System.IO.Ports.SerialPort]::GetPortNames())
+if ($ports -notcontains $Port) {
+    $shown = if ($ports.Count) { $ports -join ', ' } else { '<none>' }
+    throw "Selected port $Port is not currently present. Available serial ports: $shown"
 }
-$port.Close()
-Write-Output "--- ESP32 Boot Output ---"
-Write-Output $output
+
+try {
+    $serial = New-Object System.IO.Ports.SerialPort $Port, 115200, 'None', 8, 'One'
+    $serial.ReadTimeout = 1000
+    $serial.Open()
+
+    Write-Output "Testing USB-serial reset control on $Port..."
+
+    # Diagnostic only: this sequence exercises the adapter's DTR/RTS reset path.
+    # If it does not produce boot output, use the manual BOOT + EN/RESET sequence
+    # from NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md instead of repeatedly toggling it.
+    $serial.DtrEnable = $false
+    $serial.RtsEnable = $false
+    Start-Sleep -Milliseconds 100
+
+    $serial.DtrEnable = $true
+    $serial.RtsEnable = $true
+    Start-Sleep -Milliseconds 250
+
+    $serial.DtrEnable = $false
+    $serial.RtsEnable = $true
+    Start-Sleep -Milliseconds 500
+
+    $serial.DtrEnable = $false
+    $serial.RtsEnable = $false
+    Start-Sleep -Milliseconds 100
+
+    $output = ''
+    $deadline = (Get-Date).AddSeconds(2)
+    while ((Get-Date) -lt $deadline) {
+        if ($serial.BytesToRead -gt 0) { $output += $serial.ReadExisting() }
+        Start-Sleep -Milliseconds 50
+    }
+
+    Write-Output '--- ESP32 Boot Output ---'
+    Write-Output $output
+} finally {
+    if ($serial -and $serial.IsOpen) { $serial.Close() }
+}
