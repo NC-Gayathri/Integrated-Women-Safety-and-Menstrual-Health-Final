@@ -15,6 +15,12 @@ void noReady() {
   require(Serial.output.find(":READY") == std::string::npos,
           "failure must not emit an optical READY event");
 }
+void noMpuReady() {
+  require(!mpuReady, "failure must leave mpuReady false");
+  require(Serial.output.find("SENSOR:MPU6050:READY") == std::string::npos &&
+          Serial.output.find("SENSOR:MPU6500:READY") == std::string::npos,
+          "failure must not emit a motion-sensor READY event");
+}
 int main(int argc, char** argv) {
   if (argc != 2) return 2;
   const std::string name = argv[1];
@@ -101,11 +107,79 @@ int main(int argc, char** argv) {
       require(identifyAndConfigureOptical(), "initial sensor must be ready");
       processOpticalSample(0, 0);
       require(!heartRateValid && !spo2Valid && !fingerPresent, "no finger must not invent vitals");
+    } else if (name == "mpu6050_ready") {
+      Wire.enableMpu(0x68);
+      require(initializeMpuAt(0x68), "MPU6050 must remain supported");
+      require(mpuReady, "MPU6050 must become READY");
+      require((Wire.mpuRegs[0x6B] & 0x40) == 0, "READY requires the SLEEP bit to be cleared");
+      require((Wire.mpuRegs[0x1C] & 0x18) == 0, "READY requires the +/-2 g accelerometer range");
+      require(Serial.output.find("SENSOR:MPU6050:READY") != std::string::npos,
+              "MPU6050 READY must preserve its existing identity event");
+    } else if (name == "mpu6500_ready") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68), "WHO_AM_I 0x70 must initialize as MPU6500");
+      require(mpuReady, "MPU6500 must become READY");
+      require((Wire.mpuRegs[0x6B] & 0x40) == 0, "READY requires the SLEEP bit to be cleared");
+      require((Wire.mpuRegs[0x1C] & 0x18) == 0, "READY requires the +/-2 g accelerometer range");
+      require(Serial.output.find("SENSOR:MPU6500:READY") != std::string::npos,
+              "READY must report the actual MPU6500 identity");
+    } else if (name == "mpu6500_high_address") {
+      Wire.enableMpu(0x70, 0x69);
+      tryInitializeMpu();
+      require(mpuReady && mpuAddr == 0x69, "supported MPU6500 must remain discoverable at AD0-high address 0x69");
+      require(Serial.output.find("SENSOR:MPU6500:READY") != std::string::npos,
+              "0x69 discovery must still report MPU6500 identity");
+    } else if (name == "mpu_unknown_identity") {
+      Wire.enableMpu(0x71);
+      require(!initializeMpuAt(0x68), "unsupported WHO_AM_I must be rejected");
+      noMpuReady();
+      require(millis() < 500, "unsupported identity must terminate in bounded time");
+    } else if (name == "mpu6500_config_write_failure") {
+      Wire.enableMpu(0x70);
+      Wire.failWriteReg = 0x1C;
+      require(!initializeMpuAt(0x68), "accelerometer configuration NACK must fail initialization");
+      noMpuReady();
+    } else if (name == "mpu6500_config_readback_mismatch") {
+      Wire.enableMpu(0x70);
+      Wire.mismatchReg = 0x1C;
+      require(!initializeMpuAt(0x68), "accelerometer configuration mismatch must fail read-back verification");
+      noMpuReady();
+    } else if (name == "mpu6500_wake_readback_mismatch") {
+      Wire.enableMpu(0x70);
+      Wire.mismatchReg = 0x6B;
+      require(!initializeMpuAt(0x68), "sleep-bit read-back mismatch must fail initialization");
+      noMpuReady();
+    } else if (name == "mpu6500_reconnect") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68), "initial MPU6500 must be ready");
+      Wire.mpuPresent = false;
+      for (int i = 0; i < 3; ++i) {
+        delay(MPU_SAMPLE_INTERVAL_MS + 1);
+        updateMpuFallDetection();
+      }
+      require(!mpuReady, "three bounded I2C failures must mark MPU unavailable");
+      require(Serial.output.find("SENSOR:MPU6500:I2C_ERROR") != std::string::npos,
+              "runtime error event must identify the actual MPU6500");
+      Wire.mpuPresent = true;
+      delay(MPU_RETRY_INTERVAL_MS + 1);
+      updateMpuFallDetection();
+      require(mpuReady, "reconnected MPU6500 must reinitialize");
+      require(Serial.output.find("SENSOR:MPU6500:READY") != std::string::npos,
+              "reconnection must restore an MPU6500 READY event");
+    } else if (name == "mpu6500_sos_during_init") {
+      Wire.enableMpu(0x70);
+      Wire.operationMs = 50;
+      buttonEdges = {{100, LOW}, {280, HIGH}, {400, LOW}, {580, HIGH}, {700, LOW}, {880, HIGH}};
+      require(initializeMpuAt(0x68), "slow healthy MPU6500 initialization must finish");
+      require(Serial.output.find("[EVENT] SOS\n") != std::string::npos,
+              "three debounced clicks during MPU initialization must emit SOS");
     } else throw std::runtime_error("unknown test case");
     std::cout << "PASS " << name << '\n';
     return 0;
   } catch (const std::exception& error) {
-    if (name == "sos_during_init") std::cerr << Serial.output << "clock=" << millis() << "\n";
+    if (name == "sos_during_init" || name == "mpu6500_sos_during_init") {
+      std::cerr << Serial.output << "clock=" << millis() << "\n";
+    }
     std::cerr << "FAIL " << name << ": " << error.what() << '\n';
     return 1;
   }
