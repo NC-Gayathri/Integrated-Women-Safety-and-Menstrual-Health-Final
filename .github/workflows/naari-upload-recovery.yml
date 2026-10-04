@@ -22,5 +22,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Verify fail-closed physical upload recovery
         run: python3 scripts/test_naari_upload_recovery.py
+
+      - name: Parse PowerShell recovery helpers
+        shell: pwsh
+        run: |
+          $files = @(
+            'ble-bridge/flash_ble.ps1',
+            'ble-bridge/read_com5.ps1',
+            'ble-bridge/test_reset.ps1'
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $file),
+              [ref]$tokens,
+              [ref]$errors
+            ) | Out-Null
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Error "$file: $($_.Message)" }
+              exit 1
+            }
+          }
+          Write-Host 'PowerShell recovery helper syntax PASS'
