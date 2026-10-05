@@ -88,6 +88,7 @@ bool oldDeviceConnected = false;
 #define VITALS_REPORT_INTERVAL_MS 1000
 #define OPTICAL_SAMPLE_PERIOD_MS 10 // Both verified configurations: 100 samples/s.
 #define OPTICAL_SAMPLE_MAX_AGE_MS 500
+#define OPTICAL_SETTLE_SAMPLES 100 // One second of samples at the verified 100 Hz.
 #define SENSOR_STATUS_INTERVAL_MS 5000
 #define LED_PULSE_MS 180
 
@@ -509,6 +510,7 @@ uint32_t lastRedRaw = 0;
 uint32_t lastIrRaw = 0;
 unsigned long opticalSampleTimeMs = 0;
 unsigned long opticalSampleCount = 0;
+uint16_t opticalSettlingSamples = 0;
 
 const char* opticalChipName() {
   switch (opticalChip) {
@@ -546,6 +548,7 @@ void resetVitalsState() {
   opticalClipped = false;
   lastRedRaw = lastIrRaw = 0;
   opticalSampleTimeMs = opticalSampleCount = 0;
+  opticalSettlingSamples = 0;
 }
 
 bool configureMax30100() {
@@ -830,15 +833,28 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
   fingerPresent = !opticalClipped && irRaw > 3000 && redRaw > 1000;
   if (!fingerPresent) {
     invalidateVitalEstimates();
+    opticalSettlingSamples = 0;
     irDc = redDc = irEnvelope = previousIrAc = 0.0;
     previousSlopePositive = false;
     return;
   }
-  if (!hadContact) {
+  // A gross baseline change can be placement, light, or motion rather than a
+  // pulse. This 10% quality heuristic is not motion cancellation/calibration.
+  // Rebase immediately instead of letting the slow DC tail mimic pulse energy.
+  const bool levelChanged = hadContact &&
+      (fabs((double)redRaw - redDc) > redDc * 0.10 ||
+       fabs((double)irRaw - irDc) > irDc * 0.10);
+  if (!hadContact || levelChanged) {
+    const bool hadValidEstimate = heartRateValid || spo2Valid;
+    invalidateVitalEstimates();
     irDc = irRaw;
     redDc = redRaw;
     irEnvelope = previousIrAc = 0.0;
     previousSlopePositive = false;
+    opticalSettlingSamples = OPTICAL_SETTLE_SAMPLES;
+    // Clear the phone at the sample that invalidated it, even between reports.
+    if (hadValidEstimate) sendBleEvent("VITALS:ACQUIRING");
+    return;
   }
 
   // Slow DC tracking; AC carries the pulsatile component.
@@ -849,6 +865,13 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
   const double irAc = (double)irRaw - irDc;
 
   irEnvelope = 0.95 * irEnvelope + 0.05 * fabs(irAc);
+
+  if (opticalSettlingSamples > 0) {
+    --opticalSettlingSamples;
+    previousIrAc = irAc;
+    previousSlopePositive = false;
+    return; // No beat or ratio history may straddle the settling interval.
+  }
 
   // Heart-rate peak detection from the real IR AC waveform.
   bool slopePositive = irAc > previousIrAc;
@@ -944,6 +967,7 @@ const char* opticalSignalReason() {
   if (!opticalSampleSeen || millis() - lastOpticalSampleAt > OPTICAL_SAMPLE_MAX_AGE_MS) return "NO_SAMPLES";
   if (opticalClipped) return "SATURATED";
   if (!fingerPresent) return "LOW_LIGHT";
+  if (opticalSettlingSamples > 0) return "SETTLING";
   if (heartRateValid && spo2Valid) return "VALID";
   if (heartRateValid) return "SPO2_ACQUIRING";
   if (irEnvelope <= 10.0) return "WEAK_PULSE";
@@ -1001,6 +1025,7 @@ void updateOpticalSensor() {
   if (!opticalSampleSeen || now - lastOpticalSampleAt > OPTICAL_SAMPLE_MAX_AGE_MS) {
     invalidateVitalEstimates();
     fingerPresent = false;
+    opticalSettlingSamples = 0;
   }
 
   // A configured optical sensor should keep producing FIFO samples even with
@@ -1028,6 +1053,11 @@ void updateOpticalSensor() {
   if (now - lastVitalsReport >= VITALS_REPORT_INTERVAL_MS) {
     lastVitalsReport = now;
     reportOpticalSignal();
+
+    if (opticalSettlingSamples > 0) {
+      sendBleEvent("VITALS:ACQUIRING");
+      return;
+    }
 
     if (!fingerPresent || (!heartRateValid && irEnvelope <= 10.0)) {
       sendBleEvent("VITALS:NO_VALID_READING");
@@ -1086,7 +1116,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
-  Serial.println("[FIRMWARE] i2c-recovery-v5-20261005");
+  Serial.println("[FIRMWARE] signal-settling-v6-20261005");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);

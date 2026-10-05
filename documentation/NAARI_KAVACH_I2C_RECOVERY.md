@@ -1,6 +1,7 @@
 # I2C failure recovery — 5 October 2026
 
-The current firmware marker is `[FIRMWARE] i2c-recovery-v5-20261005`.
+The v5 repair introduced `[FIRMWARE] i2c-recovery-v5-20261005`. It remains
+included in the current [v6 signal-settling build](NAARI_KAVACH_SIGNAL_SETTLING.md).
 Use the dual-sensor sketch on `master`; the previous sensor compatibility,
 upload recovery, and vitals acquisition fixes remain included.
 
