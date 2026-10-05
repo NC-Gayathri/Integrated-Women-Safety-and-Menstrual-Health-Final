@@ -15,6 +15,8 @@ struct WireFake {
   bool mpuPresent = false;
   int failWriteReg = -1, mismatchReg = -1, failReadReg = -1;
   int transientWrites = 0, pointerNacks = 0, fifoRequests = 0;
+  int failureMs = -1; // -1 models a timeout; nonnegative models a fast NACK.
+  unsigned int transactions = 0;
   unsigned long operationMs = 1;
   uint16_t timeoutMs = 50;
 
@@ -55,10 +57,11 @@ struct WireFake {
 
   uint8_t endTransmission(bool stop = true) {
     if (!stop) { nonStop = true; return 0; }
+    ++transactions;
 
     const bool optical = opticalSelected(address);
     const bool mpu = mpuSelected(address);
-    delay(optical || mpu ? operationMs : timeoutMs);
+    delay(optical || mpu ? operationMs : (failureMs < 0 ? timeoutMs : failureMs));
     if (!optical && !mpu) return 2;
     if (tx.empty()) return 0;
 
@@ -91,6 +94,7 @@ struct WireFake {
   }
 
   int requestFrom(int addr, int length, int) {
+    ++transactions;
     rx.clear();
     const bool combined = nonStop; nonStop = false;
     if (combined) pointer = tx[0];
@@ -99,7 +103,7 @@ struct WireFake {
     const bool mpu = mpuSelected((uint8_t)addr);
     const bool failed = (!optical && !mpu) || failReads || pointer == failReadReg ||
                         (combined && failRepeatedStart);
-    delay(failed ? timeoutMs : operationMs);
+    delay(failed ? (failureMs < 0 ? timeoutMs : failureMs) : operationMs);
     if (failed) return 0;
 
     if (mpu) {

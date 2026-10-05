@@ -22,6 +22,13 @@ CASES = [
     'mpu_unknown_identity', 'mpu6500_config_write_failure',
     'mpu6500_config_readback_mismatch', 'mpu6500_wake_readback_mismatch',
     'mpu6500_reconnect', 'mpu6500_sos_during_init',
+    'metadata_wr_100', 'metadata_rd_100', 'metadata_ovf_100',
+    'metadata_wr_102', 'metadata_rd_102', 'metadata_ovf_102',
+    'metadata_wr_timeout_100', 'metadata_wr_timeout_102',
+    'empty_fifo_100', 'empty_fifo_102', 'healthy_metadata_stop_fallback',
+    'optical_failed_init_backoff', 'mpu_failed_init_backoff',
+    'mpu_runtime_backoff', 'bus_failure_sos', 'optical_failure_mpu_healthy',
+    'mpu_fault_discards_fall', 'mpu_disconnect_discards_fall',
 ]
 with tempfile.TemporaryDirectory(prefix='naari-sensors-') as temporary:
     executable = str(Path(temporary) / 'readiness-test')

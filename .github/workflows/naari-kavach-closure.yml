@@ -22,6 +22,7 @@ on:
       - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
       - "documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md"
       - "documentation/NAARI_KAVACH_VITALS_ACQUISITION.md"
+      - "documentation/NAARI_KAVACH_I2C_RECOVERY.md"
       - "esp32-firmware/README.md"
       - ".github/workflows/naari-kavach-closure.yml"
       - ".github/workflows/naari-upload-recovery.yml"
@@ -82,7 +83,7 @@ jobs:
           grep -Fq '#define BLE_MTU             64' "$F"
           grep -Fq 'BLEDevice::setMTU(BLE_MTU)' "$F"
           grep -Fq 'sendSensorHealthSnapshot();' "$F"
-          grep -Fq '[FIRMWARE] vitals-acquisition-v4-20261004' "$F"
+          grep -Fq '[FIRMWARE] i2c-recovery-v5-20261005' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"

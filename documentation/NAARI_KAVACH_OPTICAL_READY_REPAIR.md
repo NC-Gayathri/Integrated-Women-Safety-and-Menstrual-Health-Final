@@ -1,6 +1,6 @@
 # NAARI KAVACH optical READY — current repair and physical acceptance
 
-## Current status and scope — 4 October 2026
+## Current status and scope — 5 October 2026
 
 The repository default branch is **master**. The authoritative integration sketch is:
 
@@ -9,7 +9,7 @@ The repository default branch is **master**. The authoritative integration sketc
 The required boot marker is:
 
 ```text
-[FIRMWARE] vitals-acquisition-v4-20261004
+[FIRMWARE] i2c-recovery-v5-20261005
 ```
 
 Software/CI closure and physical-board closure are separate evidence gates. The repository now has bounded software evidence for MPU6050/MPU6500 compatibility, optical initialization/error recovery, BLE/SOS continuity and cleanup safety. A successful CI run does **not** prove that a particular MAX3010x module, USB cable or flashed ESP32 works physically.
@@ -27,7 +27,7 @@ Optical READY means all of the following succeeded for the identified device:
 
 READY does **not** claim that a finger is present, that HR/SpO2 is clinically valid, or that the prototype is a medical device.
 
-The latest submitted v3 log reached both `SENSOR:MAX30102:READY` and `SENSOR:MPU6500:READY`. Its remaining `VITALS:NO_VALID_READING` state is addressed by the [v4 acquisition repair and capture procedure](NAARI_KAVACH_VITALS_ACQUISITION.md). Repeated optical READY alone does not complete that data-acquisition gate.
+The earlier v3 log reached both `SENSOR:MAX30102:READY` and `SENSOR:MPU6500:READY`; the [acquisition repair](NAARI_KAVACH_VITALS_ACQUISITION.md) remains included. The newer 5 October capture contains repeated failures on the shared I2C bus as well as low light. See the [v5 I2C recovery repair](NAARI_KAVACH_I2C_RECOVERY.md) for that evidence and the current acceptance procedure. Repeated optical READY alone does not complete the acquisition or stable-bus gate.
 
 ## Confirmed software protections
 
@@ -36,6 +36,8 @@ The latest submitted v3 log reached both `SENSOR:MAX30102:READY` and `SENSOR:MPU
 - FIFO reads are treated differently because a failed transfer can already have consumed hardware FIFO bytes; ambiguous/partial FIFO failures invalidate readings and schedule full reinitialization instead of stitching together a fake sample.
 - Shutdown, reset, mode, sample and LED configuration are verified by read-back before READY.
 - Disconnects invalidate stale vital readings and schedule reinitialization.
+- Failed FIFO metadata reads also invalidate immediately and wait two seconds before verified recovery; a healthy empty FIFO is not a fault.
+- Motion read failures cancel incomplete fall sequences so recovery cannot complete an old impact as a new alert.
 - No-finger conditions do not invent heart-rate or SpO2 values.
 - SOS button polling remains serviced around bounded sensor transactions.
 - Motion-sensor failure and optical-sensor failure remain non-fatal to BLE/SOS startup.
@@ -53,9 +55,9 @@ python3 scripts/test_naari_upload_recovery.py
 node scripts/test_naari_ble_vitals.cjs
 ```
 
-The current sensor behaviour runner executes **33/33** deterministic cases around the real integration sketch through a controlled hardware boundary. Coverage includes the existing optical cases plus MPU6050 compatibility, MPU6500 `WHO_AM_I=0x70`, address `0x69`, unsupported identity rejection, wake/configuration read-back failures, reconnect recovery and SOS service during motion-sensor initialization.
+The current sensor behaviour runner executes **51/51** deterministic cases around the real integration sketch through a controlled hardware boundary. Coverage includes the existing optical cases plus MPU6050 compatibility, MPU6500 `WHO_AM_I=0x70`, address `0x69`, unsupported identity rejection, wake/configuration read-back failures, reconnect recovery and SOS service during motion-sensor initialization.
 
-The separate vitals runner covers 18 acquisition cases using artificial waveforms only at the test boundary. The BLE parser regression requires `npm ci` first. These tests establish software behavior, not accuracy on a human finger.
+The separate vitals runner covers 19 acquisition cases using artificial waveforms only at the test boundary. The BLE parser regression requires `npm ci` first. These tests establish software behavior, not accuracy on a human finger.
 
 The `NAARI KAVACH Closure Gate` also compiles the real sketch for `esp32:esp32:esp32doit-devkit-v1` using ESP32 Arduino core **3.3.12**, checks the BLE application TypeScript/lint contract, and builds the native Android debug APK. These are software/build gates only.
 
@@ -74,7 +76,7 @@ Replace the example port with the port proven by unplug/replug in Windows Device
 After successful flash, release BOOT, reset the board and capture Serial at **115200 baud**. The log must contain:
 
 ```text
-[FIRMWARE] vitals-acquisition-v4-20261004
+[FIRMWARE] i2c-recovery-v5-20261005
 ```
 
 If that exact line is absent, do not use the subsequent sensor output as evidence for the current repair.
@@ -122,7 +124,7 @@ Physical closure requires all evidence relevant to the claim being closed:
 
 | Claim | Minimum physical evidence |
 |---|---|
-| Correct firmware installed | current `vitals-acquisition-v4-20261004` boot marker |
+| Correct firmware installed | current `i2c-recovery-v5-20261005` boot marker |
 | MPU6500 fixed | real `WHO_AM_I=0x70` device reaches chip-specific READY after verified ±2 g configuration |
 | Optical sensor fixed | real MAX30100/MAX30102 identification + chip-specific READY |
 | Vitals acquisition works | current marker, real `[SIGNAL]` capture, changing valid HR/SpO2 with stable contact, and stale values cleared when contact is removed |

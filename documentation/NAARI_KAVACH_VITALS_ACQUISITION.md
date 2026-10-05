@@ -1,6 +1,10 @@
 # NAARI KAVACH vitals acquisition — 4 October 2026
 
-## What the latest hardware capture establishes
+The v4 acquisition repair described here is retained in v5. For the newer
+5 October shared-bus fault capture and current acceptance steps, see
+[I2C failure recovery](NAARI_KAVACH_I2C_RECOVERY.md).
+
+## What the earlier hardware capture establishes
 
 The submitted `mpu6500-ready-v3-20261004` log contains both
 `SENSOR:MAX30102:READY` and `SENSOR:MPU6500:READY`. The motion sensor became
@@ -13,10 +17,10 @@ samples, so it does not establish the exact cause on the physical board.
 
 The authoritative sketch remains
 `esp32-firmware/naari_kavach_dual_sensor_ble_test/naari_kavach_dual_sensor_ble_test.ino`
-on `master`. The new boot marker is:
+on `master`. The current boot marker, including the v5 recovery repair, is:
 
 ```text
-[FIRMWARE] vitals-acquisition-v4-20261004
+[FIRMWARE] i2c-recovery-v5-20261005
 ```
 
 Regression tests reproduced these defects in the previous signal path:
@@ -44,7 +48,7 @@ tests; production firmware reads the hardware FIFO.
 
 1. Update from `master` and upload the sketch above. If the loader cannot
    connect, use the [upload recovery guide](NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md).
-2. Open Serial Monitor at **115200**, then press EN/RESET. Confirm the exact v4
+2. Open Serial Monitor at **115200**, then press EN/RESET. Confirm the exact v5
    marker and both sensor READY events, allowing the existing retry interval.
 3. Leave the optical window uncovered for five seconds. Then cover both optical
    elements with a steady finger for 30 seconds, with light contact and minimal
@@ -102,7 +106,7 @@ npx eslint services/BleService.ts "app/(tabs)/safety.tsx"
 npx tsc --noEmit -p tsconfig.naari-ci.json
 ```
 
-There are 33 existing sensor/SOS cases and 18 acquisition cases. The latter
+There are 51 sensor/SOS cases and 19 acquisition cases. The latter
 include known sampled pulses, low-amplitude/quantized pulses, buffered delivery,
 darkness, flat light, a light ramp, removal, clipping, expiration, diagnostics,
 FIFO overflow/configuration and partial reports. Artificial waveforms exercise
@@ -111,7 +115,7 @@ measurement. The parser test exercises the actual BLE service with native and
 cloud boundaries stubbed. CI additionally builds the ESP32 firmware and Android
 APK and parses the Windows recovery scripts.
 
-Physical acquisition acceptance remains open until the v4 capture and phone
+Physical acquisition acceptance remains open until the current v5 capture and phone
 behavior above are observed. Because earlier captures reported power faults,
 also retain a five-minute stable-power run without brownout/checksum errors or
 unexpected restarts. A recurrence requires power-path diagnosis; firmware
