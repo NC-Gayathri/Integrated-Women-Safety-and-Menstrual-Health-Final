@@ -138,6 +138,8 @@ int main(int argc, char** argv) {
               "weak-contact optical ripple must not become a vital estimate");
       report();
       noNumbers();
+      require(std::string(opticalSignalReason()) == "WEAK_CONTACT",
+              "weak-contact rejection must be explicit in diagnostics");
     } else if (name == "buffered_pulse") {
       pulse(2480, 80, false, 31);
       require(heartRateValid && filteredBpm >= 74 && filteredBpm <= 76,
