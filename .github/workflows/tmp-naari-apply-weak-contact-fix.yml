@@ -78,7 +78,6 @@ jobs:
               Path('ble-bridge/flash_ble.ps1'),
               Path('ble-bridge/read_com5.ps1'),
               Path('scripts/test_naari_upload_recovery.py'),
-              Path('.github/workflows/naari-kavach-closure.yml'),
           ]
           changed = []
           for path in marker_files:
