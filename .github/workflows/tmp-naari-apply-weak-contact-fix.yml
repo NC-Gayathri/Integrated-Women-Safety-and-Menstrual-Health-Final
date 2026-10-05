@@ -1,0 +1,110 @@
+name: TEMP NAARI apply weak-contact fix
+
+on:
+  push:
+    branches:
+      - fix/naari-kavach-weak-contact-vitals
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/naari-kavach-weak-contact-vitals
+          fetch-depth: 0
+      - name: Apply guarded v7 weak-contact repair
+        shell: python
+        run: |
+          from pathlib import Path
+
+          ino = Path('esp32-firmware/naari_kavach_dual_sensor_ble_test/naari_kavach_dual_sensor_ble_test.ino')
+          text = ino.read_text()
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              return text.replace(old, new, 1)
+
+          text = replace_once(
+              text,
+              '#define OPTICAL_SETTLE_SAMPLES 100 // One second of samples at the verified 100 Hz.\n#define SENSOR_STATUS_INTERVAL_MS 5000',
+              '#define OPTICAL_SETTLE_SAMPLES 100 // One second of samples at the verified 100 Hz.\n// Numeric vitals need a stronger optical level than the permissive contact gate.\n// These prototype floors remain below the existing validated low-amplitude fixture\n// (RED ~= 10k, IR ~= 20k) while rejecting the physical 3-5k weak-contact region.\n#define OPTICAL_VITAL_MIN_RED_DC 5000.0\n#define OPTICAL_VITAL_MIN_IR_DC 10000.0\n#define SENSOR_STATUS_INTERVAL_MS 5000',
+              'quality constants')
+
+          text = replace_once(
+              text,
+              '  if (opticalSettlingSamples > 0) {\n    --opticalSettlingSamples;\n    previousIrAc = irAc;\n    previousSlopePositive = false;\n    return; // No beat or ratio history may straddle the settling interval.\n  }\n\n  // Heart-rate peak detection from the real IR AC waveform.',
+              '  if (opticalSettlingSamples > 0) {\n    --opticalSettlingSamples;\n    previousIrAc = irAc;\n    previousSlopePositive = false;\n    return; // No beat or ratio history may straddle the settling interval.\n  }\n\n  // The permissive raw contact gate keeps acquisition responsive, but a signal\n  // only barely above that gate is not strong enough to trust as a numeric vital.\n  // Reject it before peak timing or ratio windows can mature.\n  if (redDc < OPTICAL_VITAL_MIN_RED_DC || irDc < OPTICAL_VITAL_MIN_IR_DC) {\n    const bool hadValidEstimate = heartRateValid || spo2Valid;\n    invalidateVitalEstimates();\n    previousIrAc = irAc;\n    previousSlopePositive = false;\n    if (hadValidEstimate) sendBleEvent("VITALS:NO_VALID_READING");\n    return;\n  }\n\n  // Heart-rate peak detection from the real IR AC waveform.',
+              'weak-contact acquisition gate')
+
+          text = replace_once(
+              text,
+              '  if (!fingerPresent) return "LOW_LIGHT";\n  if (opticalSettlingSamples > 0) return "SETTLING";\n  if (heartRateValid && spo2Valid) return "VALID";',
+              '  if (!fingerPresent) return "LOW_LIGHT";\n  if (opticalSettlingSamples > 0) return "SETTLING";\n  if (redDc < OPTICAL_VITAL_MIN_RED_DC || irDc < OPTICAL_VITAL_MIN_IR_DC) return "WEAK_CONTACT";\n  if (heartRateValid && spo2Valid) return "VALID";',
+              'signal reason')
+
+          text = replace_once(
+              text,
+              '    if (!fingerPresent || (!heartRateValid && irEnvelope <= 10.0)) {\n      sendBleEvent("VITALS:NO_VALID_READING");',
+              '    if (!fingerPresent ||\n        redDc < OPTICAL_VITAL_MIN_RED_DC ||\n        irDc < OPTICAL_VITAL_MIN_IR_DC ||\n        (!heartRateValid && irEnvelope <= 10.0)) {\n      sendBleEvent("VITALS:NO_VALID_READING");',
+              'report quality gate')
+
+          old_marker = 'signal-settling-v6-20261005'
+          new_marker = 'weak-contact-v7-20261005'
+          text = replace_once(text, old_marker, new_marker, 'firmware marker')
+          ino.write_text(text)
+
+          test = Path('tests/naari_optical/vitals_test.cpp')
+          text = test.read_text()
+          text = replace_once(
+              text,
+              '      report();\n      noNumbers();\n    } else if (name == "buffered_pulse") {',
+              '      report();\n      noNumbers();\n      require(std::string(opticalSignalReason()) == "WEAK_CONTACT",\n              "weak-contact rejection must be explicit in diagnostics");\n    } else if (name == "buffered_pulse") {',
+              'weak-contact diagnostic assertion')
+          test.write_text(text)
+
+          marker_files = [
+              Path('esp32-firmware/README.md'),
+              Path('documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md'),
+              Path('documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md'),
+              Path('documentation/NAARI_KAVACH_I2C_RECOVERY.md'),
+              Path('documentation/NAARI_KAVACH_SIGNAL_SETTLING.md'),
+              Path('documentation/NAARI_KAVACH_VITALS_ACQUISITION.md'),
+              Path('ble-bridge/flash_ble.ps1'),
+              Path('ble-bridge/read_com5.ps1'),
+              Path('scripts/test_naari_upload_recovery.py'),
+              Path('.github/workflows/naari-kavach-closure.yml'),
+          ]
+          changed = []
+          for path in marker_files:
+              body = path.read_text()
+              if old_marker in body:
+                  path.write_text(body.replace(old_marker, new_marker))
+                  changed.append(str(path))
+          print('updated marker files:', *changed, sep='\n- ')
+
+          contract = Path('scripts/test_naari_upload_recovery.py')
+          if new_marker not in contract.read_text():
+              raise SystemExit('upload contract did not move to v7 marker')
+
+          doc = Path('documentation/NAARI_KAVACH_WEAK_CONTACT_FILTER.md')
+          doc.write_text('''# Weak-contact numeric-vitals rejection — 5 October 2026\n\nCurrent firmware: `[FIRMWARE] weak-contact-v7-20261005`.\n\nThe physical v6 capture proved a strong valid phase around RED 202k / IR 230k,\nthen showed a degraded optical region around 3–5k counts that remained above\nthe older permissive `fingerPresent` gate. Small ripple in that region could\nmature into partial heart-rate estimates while SpO2 remained acquiring.\n\nV7 keeps the permissive raw contact gate for state detection, but numeric\nvitals now require tracked DC levels of at least RED 5,000 and IR 10,000.\nBelow that prototype quality floor, beat timing and ratio history are cleared\nbefore they can mature, diagnostics report `WEAK_CONTACT`, and BLE reports\n`VITALS:NO_VALID_READING`. A previously valid estimate is cleared immediately.\n\nThis is a conservative prototype signal-quality rule, not clinical calibration.\nThe existing low-amplitude regression at approximately RED 10k / IR 20k must\ncontinue to acquire, while the physical weak-contact regression at RED 3.5k /\nIR 3.9k +/- 120 must never produce a numeric vital.\n\nThe change does not alter I2C timing, LED current, MPU/fall logic, SOS logic,\nrate-alias rejection, signal-settling behavior, or the prototype SpO2 formula.\n''')
+
+          Path('.github/workflows/tmp-naari-apply-weak-contact-fix.yml').unlink()
+      - name: Run focused RED-to-GREEN suites
+        run: |
+          python3 scripts/test_naari_vitals_behavior.py
+          python3 scripts/test_naari_optical_behavior.py
+          python3 scripts/test_naari_upload_recovery.py
+      - name: Commit v7 repair
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "Reject weak-contact ripple before publishing vitals"
+          git push origin HEAD:fix/naari-kavach-weak-contact-vitals
