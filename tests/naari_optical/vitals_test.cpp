@@ -32,6 +32,15 @@ void noNumbers() {
           Serial.output.find("[EVENT] SPO2:") == std::string::npos,
           "invalid input must not publish numeric vitals");
 }
+
+void levelPulse(uint32_t redDcLevel, uint32_t irDcLevel, int frames = 600) {
+  for (int i = 0; i < frames; ++i) {
+    delay(10);
+    const double wave = sin(2.0 * 3.141592653589793 * i / 100);
+    processOpticalSample(static_cast<uint32_t>(redDcLevel * (1.0 + 0.006 * wave)),
+                         static_cast<uint32_t>(irDcLevel * (1.0 + 0.010 * wave)));
+  }
+}
 int main(int argc, char** argv) {
   if (argc != 2) return 2;
   const std::string name = argv[1];
@@ -46,6 +55,71 @@ int main(int argc, char** argv) {
               "clean 100-frame pulse must acquire 60 BPM");
       require(spo2Valid && latestSpo2 >= 94 && latestSpo2 <= 96,
               "clean ratio fixture must acquire the existing prototype estimate");
+    } else if (name == "step_red" || name == "step_ir" || name == "step_up" ||
+               name == "step_red_100" || name == "step_ir_100") {
+      pulse(); require(heartRateValid && spo2Valid, "fixture must first acquire valid estimates");
+      const bool redOnly = name.rfind("step_red", 0) == 0;
+      const uint32_t red = redOnly || name == "step_up" ? 45000 : 30000;
+      const uint32_t ir = redOnly ? 60000 : name == "step_up" ? 90000 : 45000;
+      Serial.output.clear();
+      delay(10); processOpticalSample(red, ir);
+      noNumbers();
+      require(Serial.output.find("[EVENT] VITALS:ACQUIRING") != std::string::npos,
+              "a level discontinuity must immediately clear the phone's old measurement");
+      require(std::string(opticalSignalReason()) == "SETTLING",
+              "a rebased signal must identify its settling phase");
+      for (int i = 0; i < 100; ++i) { delay(10); processOpticalSample(red, ir); }
+      noNumbers();
+      require(fabs(redDc - red) < 1 && fabs(irDc - ir) < 1,
+              "a flat new level must rebase promptly, not retain the old DC tail");
+      levelPulse(red, ir);
+      require(heartRateValid && filteredBpm >= 59 && filteredBpm <= 61 && spo2Valid,
+              "a fresh pulse at the new baseline must reacquire both estimates");
+    } else if (name == "settling_repeated_steps" || name == "settling_buffered") {
+      pulse(); require(heartRateValid && spo2Valid, "fixture must first acquire valid estimates");
+      delay(10); processOpticalSample(200000, 240000);
+      noNumbers();
+      for (int i = 0; i < 99; ++i) {
+        if (name == "settling_buffered") { if (i % 31 == 0) delay(310); }
+        else delay(10);
+        processOpticalSample(200000, 240000);
+      }
+      require(std::string(opticalSignalReason()) == "SETTLING",
+              "settling must require a full sample interval, including buffered delivery");
+      if (name == "settling_repeated_steps") {
+        delay(10); processOpticalSample(150000, 180000);
+        for (int i = 0; i < 99; ++i) { delay(10); processOpticalSample(150000, 180000); }
+        require(std::string(opticalSignalReason()) == "SETTLING",
+                "a second disturbance must restart the settling interval");
+      }
+      noNumbers();
+    } else if (name == "high_baseline_pulse") {
+      levelPulse(209000, 242000);
+      require(heartRateValid && filteredBpm >= 59 && filteredBpm <= 61 && spo2Valid,
+              "a small pulse at the capture's high baseline must remain detectable");
+    } else if (name == "settling_report") {
+      delay(10); processOpticalSample(200000, 240000);
+      report();
+      noNumbers();
+      require(Serial.output.find("reason=SETTLING") != std::string::npos &&
+              Serial.output.find("[EVENT] VITALS:ACQUIRING") != std::string::npos,
+              "settling must report acquisition consistently in Serial and BLE");
+    } else if (name == "settling_samples_expired") {
+      delay(10); processOpticalSample(200000, 240000);
+      delay(600); report(); noNumbers();
+      require(Serial.output.find("reason=NO_SAMPLES") != std::string::npos &&
+              Serial.output.find("[EVENT] VITALS:NO_VALID_READING") != std::string::npos,
+              "missing samples must end settling and report the actual loss of data");
+    } else if (name == "step_flat_high_to_low") {
+      levelPulse(209000, 242000);
+      require(heartRateValid && spo2Valid, "fixture must acquire at the capture's high baseline");
+      Serial.output.clear();
+      delay(10); processOpticalSample(5449, 10413);
+      noNumbers();
+      for (int i = 0; i < 800; ++i) { delay(10); processOpticalSample(5449, 10413); }
+      noNumbers();
+      require(std::string(opticalSignalReason()) == "WEAK_PULSE",
+              "a flat bright background must settle without being mistaken for a pulse");
     } else if (name == "low_amplitude_pulse") {
       pulse(1600, 100, true);
       require(heartRateValid && filteredBpm >= 59 && filteredBpm <= 61,
@@ -116,7 +190,9 @@ int main(int argc, char** argv) {
       pulse(); require(heartRateValid && spo2Valid, "fixture must first acquire both values");
       // A red channel without pulsation makes the next ratio window invalid
       // while the IR channel still supplies a valid beat interval.
-      for (int i = 0; i < 100; ++i) {
+      // Two complete windows guarantee a pure flat-red ratio window regardless
+      // of how startup settling aligned the preceding fixture's window.
+      for (int i = 0; i < 200; ++i) {
         delay(10);
         processOpticalSample(30000, static_cast<uint32_t>(60000 + 1000 * sin(2.0 * 3.141592653589793 * i / 100)));
       }

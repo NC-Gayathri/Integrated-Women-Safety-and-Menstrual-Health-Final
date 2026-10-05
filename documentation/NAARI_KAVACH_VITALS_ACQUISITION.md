@@ -1,8 +1,9 @@
 # NAARI KAVACH vitals acquisition — 4 October 2026
 
-The v4 acquisition repair described here is retained in v5. For the newer
-5 October shared-bus fault capture and current acceptance steps, see
-[I2C failure recovery](NAARI_KAVACH_I2C_RECOVERY.md).
+The v4 acquisition repair described here is retained in v6, along with the
+[v5 I2C recovery](NAARI_KAVACH_I2C_RECOVERY.md). For the latest capture with
+accepted readings and large baseline changes, see the
+[v6 settling repair](NAARI_KAVACH_SIGNAL_SETTLING.md).
 
 ## What the earlier hardware capture establishes
 
@@ -17,10 +18,10 @@ samples, so it does not establish the exact cause on the physical board.
 
 The authoritative sketch remains
 `esp32-firmware/naari_kavach_dual_sensor_ble_test/naari_kavach_dual_sensor_ble_test.ino`
-on `master`. The current boot marker, including the v5 recovery repair, is:
+on `master`. The current boot marker, including the v5 recovery and v6 settling repairs, is:
 
 ```text
-[FIRMWARE] i2c-recovery-v5-20261005
+[FIRMWARE] signal-settling-v6-20261005
 ```
 
 Regression tests reproduced these defects in the previous signal path:
@@ -48,7 +49,7 @@ tests; production firmware reads the hardware FIFO.
 
 1. Update from `master` and upload the sketch above. If the loader cannot
    connect, use the [upload recovery guide](NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md).
-2. Open Serial Monitor at **115200**, then press EN/RESET. Confirm the exact v5
+2. Open Serial Monitor at **115200**, then press EN/RESET. Confirm the exact v6
    marker and both sensor READY events, allowing the existing retry interval.
 3. Leave the optical window uncovered for five seconds. Then cover both optical
    elements with a steady finger for 30 seconds, with light contact and minimal
@@ -83,6 +84,7 @@ not the age of a frame inside the sensor FIFO.
 | `LOW_LIGHT` | Raw light is below the existing contact heuristic. Check coverage and whether red/IR values respond to a finger; lighting, power or optical hardware may also be involved. |
 | `WEAK_PULSE` | Light is present but the AC envelope is small. Hold steady with light contact; retain the values if this persists. |
 | `SATURATED` | A channel reached the configured ADC limit. Check placement and ambient light; increasing LED current is not the remedy for clipping. |
+| `SETTLING` | New contact or a large baseline change; previous estimates are discarded while stable samples are collected. |
 | `ACQUIRING` | Enough light/change to attempt detection, but no accepted beat interval yet. |
 | `SPO2_ACQUIRING` | Heart rate is available; the red/IR ratio window has not produced an accepted estimate. |
 | `VALID` | Both estimates meet this prototype's filters. This does not establish medical accuracy. |
@@ -106,7 +108,7 @@ npx eslint services/BleService.ts "app/(tabs)/safety.tsx"
 npx tsc --noEmit -p tsconfig.naari-ci.json
 ```
 
-There are 51 sensor/SOS cases and 19 acquisition cases. The latter
+There are 51 sensor/SOS cases and 30 acquisition cases. The latter
 include known sampled pulses, low-amplitude/quantized pulses, buffered delivery,
 darkness, flat light, a light ramp, removal, clipping, expiration, diagnostics,
 FIFO overflow/configuration and partial reports. Artificial waveforms exercise
@@ -115,7 +117,7 @@ measurement. The parser test exercises the actual BLE service with native and
 cloud boundaries stubbed. CI additionally builds the ESP32 firmware and Android
 APK and parses the Windows recovery scripts.
 
-Physical acquisition acceptance remains open until the current v5 capture and phone
+Physical acquisition acceptance remains open until the current v6 capture and phone
 behavior above are observed. Because earlier captures reported power faults,
 also retain a five-minute stable-power run without brownout/checksum errors or
 unexpected restarts. A recurrence requires power-path diagnosis; firmware

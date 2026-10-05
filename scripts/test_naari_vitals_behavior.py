@@ -13,6 +13,10 @@ CASES = [
     'reason_no_samples', 'reason_low_light', 'reason_weak_pulse',
     'overflow_100', 'overflow_102',
     'partial_report', 'fifo_config_mismatch',
+    'step_red', 'step_ir', 'step_up', 'step_flat_high_to_low',
+    'settling_repeated_steps', 'settling_buffered', 'high_baseline_pulse',
+    'step_red_100', 'step_ir_100',
+    'settling_report', 'settling_samples_expired',
 ]
 with tempfile.TemporaryDirectory(prefix='naari-vitals-') as temporary:
     executable = str(Path(temporary) / 'vitals-test')

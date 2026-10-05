@@ -9,10 +9,14 @@ The repository default branch is **master**. The authoritative integration sketc
 The required boot marker is:
 
 ```text
-[FIRMWARE] i2c-recovery-v5-20261005
+[FIRMWARE] signal-settling-v6-20261005
 ```
 
 Software/CI closure and physical-board closure are separate evidence gates. The repository now has bounded software evidence for MPU6050/MPU6500 compatibility, optical initialization/error recovery, BLE/SOS continuity and cleanup safety. A successful CI run does **not** prove that a particular MAX3010x module, USB cable or flashed ESP32 works physically.
+
+The latest afternoon capture contains accepted readings and large optical
+baseline changes. See the [v6 settling repair and evidence](NAARI_KAVACH_SIGNAL_SETTLING.md)
+for the current acquisition behavior; the earlier I2C protections below remain.
 
 ## Optical READY meaning
 
@@ -57,7 +61,7 @@ node scripts/test_naari_ble_vitals.cjs
 
 The current sensor behaviour runner executes **51/51** deterministic cases around the real integration sketch through a controlled hardware boundary. Coverage includes the existing optical cases plus MPU6050 compatibility, MPU6500 `WHO_AM_I=0x70`, address `0x69`, unsupported identity rejection, wake/configuration read-back failures, reconnect recovery and SOS service during motion-sensor initialization.
 
-The separate vitals runner covers 19 acquisition cases using artificial waveforms only at the test boundary. The BLE parser regression requires `npm ci` first. These tests establish software behavior, not accuracy on a human finger.
+The separate vitals runner covers 30 acquisition cases using artificial waveforms only at the test boundary. The BLE parser regression requires `npm ci` first. These tests establish software behavior, not accuracy on a human finger.
 
 The `NAARI KAVACH Closure Gate` also compiles the real sketch for `esp32:esp32:esp32doit-devkit-v1` using ESP32 Arduino core **3.3.12**, checks the BLE application TypeScript/lint contract, and builds the native Android debug APK. These are software/build gates only.
 
@@ -76,7 +80,7 @@ Replace the example port with the port proven by unplug/replug in Windows Device
 After successful flash, release BOOT, reset the board and capture Serial at **115200 baud**. The log must contain:
 
 ```text
-[FIRMWARE] i2c-recovery-v5-20261005
+[FIRMWARE] signal-settling-v6-20261005
 ```
 
 If that exact line is absent, do not use the subsequent sensor output as evidence for the current repair.
@@ -124,7 +128,7 @@ Physical closure requires all evidence relevant to the claim being closed:
 
 | Claim | Minimum physical evidence |
 |---|---|
-| Correct firmware installed | current `i2c-recovery-v5-20261005` boot marker |
+| Correct firmware installed | current `signal-settling-v6-20261005` boot marker |
 | MPU6500 fixed | real `WHO_AM_I=0x70` device reaches chip-specific READY after verified ±2 g configuration |
 | Optical sensor fixed | real MAX30100/MAX30102 identification + chip-specific READY |
 | Vitals acquisition works | current marker, real `[SIGNAL]` capture, changing valid HR/SpO2 with stable contact, and stale values cleared when contact is removed |
