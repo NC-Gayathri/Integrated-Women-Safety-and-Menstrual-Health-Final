@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ExpectedMarker = '[FIRMWARE] signal-settling-v6-20261005'
+$ExpectedMarker = '[FIRMWARE] weak-contact-v7-20261005'
 $serial = $null
 $markerSeen = $false
 

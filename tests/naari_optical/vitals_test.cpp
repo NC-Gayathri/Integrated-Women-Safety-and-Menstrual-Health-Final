@@ -124,6 +124,22 @@ int main(int argc, char** argv) {
       pulse(1600, 100, true);
       require(heartRateValid && filteredBpm >= 59 && filteredBpm <= 61,
               "a detectable pulse must survive the envelope trough between beats");
+    } else if (name == "weak_contact_noise") {
+      // Physical 5 Oct capture after contact degraded: raw channels remained just
+      // above the old contact gate (~3-5k) and small optical ripple was enough
+      // to produce partial HR events. That weak-contact region must never mature
+      // into a numeric vital.
+      for (int i = 0; i < 1600; ++i) {
+        delay(10);
+        const double wave = sin(2.0 * 3.141592653589793 * i / 80);
+        processOpticalSample(3500, static_cast<uint32_t>(3900 + 120 * wave));
+      }
+      require(!heartRateValid && !spo2Valid,
+              "weak-contact optical ripple must not become a vital estimate");
+      report();
+      noNumbers();
+      require(std::string(opticalSignalReason()) == "WEAK_CONTACT",
+              "weak-contact rejection must be explicit in diagnostics");
     } else if (name == "buffered_pulse") {
       pulse(2480, 80, false, 31);
       require(heartRateValid && filteredBpm >= 74 && filteredBpm <= 76,

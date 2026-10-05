@@ -89,6 +89,11 @@ bool oldDeviceConnected = false;
 #define OPTICAL_SAMPLE_PERIOD_MS 10 // Both verified configurations: 100 samples/s.
 #define OPTICAL_SAMPLE_MAX_AGE_MS 500
 #define OPTICAL_SETTLE_SAMPLES 100 // One second of samples at the verified 100 Hz.
+// Numeric vitals need a stronger optical level than the permissive contact gate.
+// These prototype floors remain below the existing validated low-amplitude fixture
+// (RED ~= 10k, IR ~= 20k) while rejecting the physical 3-5k weak-contact region.
+#define OPTICAL_VITAL_MIN_RED_DC 5000.0
+#define OPTICAL_VITAL_MIN_IR_DC 10000.0
 #define SENSOR_STATUS_INTERVAL_MS 5000
 #define LED_PULSE_MS 180
 
@@ -873,6 +878,18 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
     return; // No beat or ratio history may straddle the settling interval.
   }
 
+  // The permissive raw contact gate keeps acquisition responsive, but a signal
+  // only barely above that gate is not strong enough to trust as a numeric vital.
+  // Reject it before peak timing or ratio windows can mature.
+  if (redDc < OPTICAL_VITAL_MIN_RED_DC || irDc < OPTICAL_VITAL_MIN_IR_DC) {
+    const bool hadValidEstimate = heartRateValid || spo2Valid;
+    invalidateVitalEstimates();
+    previousIrAc = irAc;
+    previousSlopePositive = false;
+    if (hadValidEstimate) sendBleEvent("VITALS:NO_VALID_READING");
+    return;
+  }
+
   // Heart-rate peak detection from the real IR AC waveform.
   bool slopePositive = irAc > previousIrAc;
   double peakThreshold = fmax(15.0, irEnvelope * 0.55);
@@ -968,6 +985,7 @@ const char* opticalSignalReason() {
   if (opticalClipped) return "SATURATED";
   if (!fingerPresent) return "LOW_LIGHT";
   if (opticalSettlingSamples > 0) return "SETTLING";
+  if (redDc < OPTICAL_VITAL_MIN_RED_DC || irDc < OPTICAL_VITAL_MIN_IR_DC) return "WEAK_CONTACT";
   if (heartRateValid && spo2Valid) return "VALID";
   if (heartRateValid) return "SPO2_ACQUIRING";
   if (irEnvelope <= 10.0) return "WEAK_PULSE";
@@ -1059,7 +1077,10 @@ void updateOpticalSensor() {
       return;
     }
 
-    if (!fingerPresent || (!heartRateValid && irEnvelope <= 10.0)) {
+    if (!fingerPresent ||
+        redDc < OPTICAL_VITAL_MIN_RED_DC ||
+        irDc < OPTICAL_VITAL_MIN_IR_DC ||
+        (!heartRateValid && irEnvelope <= 10.0)) {
       sendBleEvent("VITALS:NO_VALID_READING");
       return;
     }
@@ -1116,7 +1137,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
-  Serial.println("[FIRMWARE] signal-settling-v6-20261005");
+  Serial.println("[FIRMWARE] weak-contact-v7-20261005");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);

@@ -1,6 +1,6 @@
 # Optical signal settling — 5 October 2026
 
-Current firmware: `[FIRMWARE] signal-settling-v6-20261005`.
+Current firmware: `[FIRMWARE] weak-contact-v7-20261005`.
 The authoritative source is the dual-sensor sketch on `master`. All earlier
 MPU compatibility, upload, I2C recovery and stale-phone-value repairs remain
 included.

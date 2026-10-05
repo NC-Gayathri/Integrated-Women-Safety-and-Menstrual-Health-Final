@@ -21,7 +21,7 @@ The authoritative sketch remains
 on `master`. The current boot marker, including the v5 recovery and v6 settling repairs, is:
 
 ```text
-[FIRMWARE] signal-settling-v6-20261005
+[FIRMWARE] weak-contact-v7-20261005
 ```
 
 Regression tests reproduced these defects in the previous signal path:

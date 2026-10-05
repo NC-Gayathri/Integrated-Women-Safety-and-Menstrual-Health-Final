@@ -7,7 +7,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = [
-    'clean_pulse', 'low_amplitude_pulse', 'buffered_pulse', 'too_fast_pulse',
+    'clean_pulse', 'low_amplitude_pulse', 'weak_contact_noise', 'buffered_pulse', 'too_fast_pulse',
     'dark', 'flat_light', 'light_ramp',
     'finger_removed', 'clipped_100', 'clipped_102', 'beat_expired', 'samples_expired',
     'reason_no_samples', 'reason_low_light', 'reason_weak_pulse',
