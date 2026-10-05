@@ -103,6 +103,125 @@ int main(int argc, char** argv) {
       Wire.absent = false; delay(2100);
       updateOpticalSensor();
       require(opticalReady, "reconnected sensor must reinitialize");
+    } else if (name.rfind("metadata_", 0) == 0) {
+      require(identifyAndConfigureOptical(), "initial sensor must be ready");
+      processOpticalSample(24000, 30000);
+      heartRateValid = spo2Valid = fingerPresent = true;
+      filteredBpm = 75; latestSpo2 = 98;
+      // The capture failed WR and overflow reads. Also cover RD and both chips.
+      Wire.failReadReg = name.find("_wr_") != std::string::npos ? (max100 ? 0x02 : 0x04) :
+                        name.find("_rd_") != std::string::npos ? (max100 ? 0x04 : 0x06) :
+                        (max100 ? 0x03 : 0x05);
+      Wire.failureMs = name.find("timeout") == std::string::npos ? 0 : -1;
+      Serial.output.clear();
+      updateOpticalSensor();
+      require(!opticalReady && !heartRateValid && !spo2Valid && !fingerPresent,
+              "failed FIFO metadata must immediately invalidate sensor and stale vitals");
+      require(Serial.output.find(max100 ? "SENSOR:MAX30100:I2C_ERROR" : "SENSOR:MAX30102:I2C_ERROR") != std::string::npos,
+              "metadata failure must immediately clear the phone via I2C_ERROR");
+      require(Serial.output.find("HEART_RATE:") == std::string::npos &&
+              Serial.output.find("SPO2:") == std::string::npos,
+              "metadata fault must not publish stale numbers");
+      const auto failedAt = millis();
+      const auto transactions = Wire.transactions;
+      for (int i = 0; i < 1999; ++i) { delay(1); updateOpticalSensor(); }
+      require(Wire.transactions == transactions, "metadata failure must not hammer I2C during backoff");
+      Wire.failReadReg = -1;
+      testClock = failedAt + 2000;
+      updateOpticalSensor();
+      require(opticalReady, "sensor must recover by verified initialization after backoff");
+      require(!heartRateValid && !spo2Valid && opticalSampleCount == 0,
+              "reinitialization must require new samples, not restore old measurements");
+    } else if (name == "empty_fifo_100" || name == "empty_fifo_102" || name == "healthy_metadata_stop_fallback") {
+      require(identifyAndConfigureOptical(), "initial sensor must be ready");
+      Serial.output.clear();
+      if (name == "healthy_metadata_stop_fallback") Wire.failRepeatedStart = true;
+      updateOpticalSensor();
+      require(opticalReady, "empty FIFO and recovered register reads must remain healthy");
+      require(Serial.output.find("I2C_ERROR") == std::string::npos,
+              "a healthy empty FIFO must not report a transport failure");
+    } else if (name == "optical_failed_init_backoff" || name == "mpu_failed_init_backoff") {
+      delay(2100);
+      const bool motion = name == "mpu_failed_init_backoff";
+      if (motion) updateMpuFallDetection();
+      else { Wire.failReadReg = 0xFF; updateOpticalSensor(); }
+      const auto failedAt = millis();
+      const auto transactions = Wire.transactions;
+      testClock = failedAt + 1999;
+      if (motion) updateMpuFallDetection(); else updateOpticalSensor();
+      require(Wire.transactions == transactions,
+              "failed initialization must be followed by a full backoff measured from completion");
+      if (motion) Wire.enableMpu(0x70); else Wire.failReadReg = -1;
+      testClock = failedAt + 2000;
+      if (motion) { updateMpuFallDetection(); require(mpuReady, "MPU reconnect must recover after backoff"); }
+      else { updateOpticalSensor(); require(opticalReady, "optical reconnect must recover after backoff"); }
+    } else if (name == "mpu_fault_discards_fall" || name == "mpu_disconnect_discards_fall") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68), "initial MPU must be ready");
+      delay(30000); // Beyond the existing 25-second fall cooldown.
+      auto acceleration = [](uint8_t x, uint8_t y, uint8_t z) {
+        Wire.mpuRegs[0x3B] = x; Wire.mpuRegs[0x3D] = y; Wire.mpuRegs[0x3F] = z;
+        delay(21); updateMpuFallDetection();
+      };
+      // A real free-fall/impact sequence interrupted before the stationary check.
+      acceleration(0, 0, 0);
+      acceleration(0x60, 0x60, 0x60);
+      Wire.failReadReg = 0x3B;
+      for (int i = 0; i < (name == "mpu_fault_discards_fall" ? 1 : 3); ++i) {
+        delay(21); updateMpuFallDetection();
+      }
+      Wire.failReadReg = -1;
+      Wire.mpuRegs[0x3B] = Wire.mpuRegs[0x3D] = 0;
+      Wire.mpuRegs[0x3F] = 0x40;
+      Serial.output.clear();
+      delay(2100); updateMpuFallDetection();
+      acceleration(0, 0, 0x40);
+      require(Serial.output.find("FALL_DETECTED") == std::string::npos,
+              "recovery must not finish an old fall sequence across missing motion samples");
+      // A new complete sequence after recovery must still alert.
+      acceleration(0, 0, 0);
+      acceleration(0x60, 0x60, 0x60);
+      delay(1001); acceleration(0, 0, 0x40);
+      require(Serial.output.find("FALL_DETECTED") != std::string::npos,
+              "a fresh complete fall sequence must remain detectable after recovery");
+    } else if (name == "mpu_runtime_backoff") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68), "initial MPU must be ready");
+      delay(10000); Wire.mpuPresent = false; Wire.failureMs = 0;
+      for (int i = 0; i < 3; ++i) { delay(21); updateMpuFallDetection(); }
+      require(!mpuReady, "persistent MPU transport failure must mark it unavailable");
+      const auto failedAt = millis();
+      const auto transactions = Wire.transactions;
+      for (int i = 0; i < 1999; ++i) { delay(1); updateMpuFallDetection(); }
+      require(Wire.transactions == transactions, "MPU runtime failure must wait a full retry interval");
+      Wire.mpuPresent = true; testClock = failedAt + 2000;
+      updateMpuFallDetection();
+      require(mpuReady, "MPU must recover after runtime backoff");
+    } else if (name == "bus_failure_sos" || name == "optical_failure_mpu_healthy") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68) && identifyAndConfigureOptical(), "both sensors must start ready");
+      delay(10000);
+      const auto startedAt = millis();
+      Wire.failureMs = 0;
+      if (name == "bus_failure_sos") Wire.failReads = true;
+      else Wire.failReadReg = 0x04;
+      buttonEdges = {{startedAt + 100, LOW}, {startedAt + 250, HIGH},
+                     {startedAt + 400, LOW}, {startedAt + 550, HIGH},
+                     {startedAt + 700, LOW}, {startedAt + 850, HIGH}};
+      Serial.output.clear();
+      const auto transactions = Wire.transactions;
+      while (millis() - startedAt < 1900) loop();
+      require(!opticalReady, "optical metadata fault must remain unavailable during backoff");
+      require(Serial.output.find("[EVENT] SOS\n") != std::string::npos,
+              "SOS must remain responsive during persistent sensor transport failure");
+      if (name == "bus_failure_sos") {
+        require(!mpuReady, "shared bus failure must invalidate both sensors");
+        require(Wire.transactions - transactions <= 20, "shared fast failures must not cause a polling storm");
+      }
+      else require(mpuReady, "optical transport failure must not disable a healthy MPU");
+      Wire.failReads = false; Wire.failReadReg = -1;
+      delay(2100); loop();
+      require(opticalReady && mpuReady, "both sensors must automatically recover after the fault clears");
     } else if (name == "no_finger") {
       require(identifyAndConfigureOptical(), "initial sensor must be ready");
       processOpticalSample(0, 0);

@@ -387,8 +387,8 @@ void updateMpuFallDetection() {
 
   if (!mpuReady) {
     if (now - lastMpuRetry >= MPU_RETRY_INTERVAL_MS) {
-      lastMpuRetry = now;
       tryInitializeMpu();
+      lastMpuRetry = millis(); // Give a failed attempt a full quiet interval.
     }
     return;
   }
@@ -398,10 +398,14 @@ void updateMpuFallDetection() {
 
   uint8_t raw[6];
   if (!readBytes(mpuAddr, MPU_REG_ACCEL_XOUT_H, raw, sizeof(raw))) {
+    // Missing motion samples break the free-fall/impact/stationary sequence.
+    // Never finish a pre-fault sequence with post-recovery acceleration.
+    fallState = FALL_IDLE;
     if (++mpuConsecutiveErrors >= 3) {
       const char* failedChip = mpuChipName();
       mpuReady = false;
       mpuConsecutiveErrors = 0;
+      lastMpuRetry = millis();
       Serial.printf("[MPU] %s I2C failures; sensor marked unavailable.\n", failedChip);
       sendBleEvent(String("SENSOR:") + failedChip + ":I2C_ERROR");
     }
@@ -473,7 +477,6 @@ OpticalChip opticalChip = OPTICAL_NONE;
 bool opticalReady = false;
 uint8_t opticalPartId = 0;
 uint8_t opticalRevisionId = 0;
-uint8_t opticalConsecutiveErrors = 0;
 unsigned long lastOpticalRetry = 0;
 unsigned long lastVitalsReport = 0;
 unsigned long lastSensorStatusReport = 0;
@@ -704,7 +707,6 @@ bool identifyAndConfigureOptical() {
   }
 
   opticalReady = true;
-  opticalConsecutiveErrors = 0;
   lastOpticalSampleAt = millis();
   resetVitalsState();
 
@@ -715,17 +717,22 @@ bool identifyAndConfigureOptical() {
   return true;
 }
 
+void markOpticalI2cFailure(const char* operation) {
+  opticalReady = false;
+  resetVitalsState();
+  lastOpticalRetry = millis();
+  Serial.printf("[OPTICAL] %s failed; discarding samples; retry in %lu ms.\n",
+                operation, (unsigned long)OPTICAL_RETRY_INTERVAL_MS);
+  sendBleEvent(String("SENSOR:") + opticalChipName() + ":I2C_ERROR");
+}
+
 bool readOpticalFifo(uint8_t reg, uint8_t* buffer, uint8_t length) {
   // FIFO reads consume samples. ESP32 reports zero on a bus error even when
   // some bytes reached the sensor, so zero is NOT proof that retry is safe.
   // Use STOP immediately and require one complete transfer. On any failure,
   // invalidate the old readings and reset/reconfigure before consuming again.
   if (readBytes(MAX3010X_ADDR, reg, buffer, length, false)) return true;
-  opticalReady = false;
-  resetVitalsState();
-  lastOpticalRetry = millis();
-  Serial.println("[OPTICAL] FIFO transfer failed; discarding samples and scheduling reset.");
-  sendBleEvent(String("SENSOR:") + opticalChipName() + ":I2C_ERROR");
+  markOpticalI2cFailure("FIFO transfer");
   return false;
 }
 
@@ -733,9 +740,13 @@ bool readMax30100Sample(uint32_t& red, uint32_t& ir) {
   uint8_t wr = 0;
   uint8_t rd = 0;
   uint8_t overflow = 0;
-  if (!readRegister8(MAX3010X_ADDR, 0x02, wr)) return false;
-  if (!readRegister8(MAX3010X_ADDR, 0x04, rd)) return false;
-  if (!readRegister8(MAX3010X_ADDR, 0x03, overflow)) return false;
+  if (!readRegister8(MAX3010X_ADDR, 0x02, wr) ||
+      !readRegister8(MAX3010X_ADDR, 0x04, rd) ||
+      !readRegister8(MAX3010X_ADDR, 0x03, overflow)) {
+    // Exhausted register retries are a transport fault, not an empty FIFO.
+    markOpticalI2cFailure("FIFO metadata read");
+    return false;
+  }
   if ((overflow & 0x0F) != 0) {
     opticalReady = false;
     resetVitalsState();
@@ -762,10 +773,13 @@ bool readMax30102Sample(uint32_t& red, uint32_t& ir) {
   uint8_t wr = 0;
   uint8_t rd = 0;
   uint8_t overflow = 0;
-  if (!readRegister8(MAX3010X_ADDR, 0x04, wr)) return false;
-  if (!readRegister8(MAX3010X_ADDR, 0x06, rd)) return false;
   // Check before popping: MAX30102 clears overflow when a sample is read.
-  if (!readRegister8(MAX3010X_ADDR, 0x05, overflow)) return false;
+  if (!readRegister8(MAX3010X_ADDR, 0x04, wr) ||
+      !readRegister8(MAX3010X_ADDR, 0x06, rd) ||
+      !readRegister8(MAX3010X_ADDR, 0x05, overflow)) {
+    markOpticalI2cFailure("FIFO metadata read");
+    return false;
+  }
   if ((overflow & 0x1F) != 0) {
     opticalReady = false;
     resetVitalsState();
@@ -947,9 +961,10 @@ void updateOpticalSensor() {
 
   if (!opticalReady) {
     if (now - lastOpticalRetry >= OPTICAL_RETRY_INTERVAL_MS) {
-      lastOpticalRetry = now;
-
-      if (!identifyAndConfigureOptical()) {
+      const bool initialized = identifyAndConfigureOptical();
+      lastOpticalRetry = millis();
+      now = millis();
+      if (!initialized) {
         if (now - lastSensorStatusReport >= SENSOR_STATUS_INTERVAL_MS) {
           lastSensorStatusReport = now;
           sendBleEvent("SENSOR:MAX3010X:NOT_READY");
@@ -978,11 +993,10 @@ void updateOpticalSensor() {
     if (!gotSample) break;
 
     samplesReadThisLoop++;
-    opticalConsecutiveErrors = 0;
     processOpticalSample(red, ir);
   }
 
-  if (!opticalReady) return; // FIFO fault requires reset before further reads.
+  if (!opticalReady) return; // Any FIFO/metadata fault requires reset before reads.
   now = millis(); // I2C work advances time after the sample's receipt timestamp.
   if (!opticalSampleSeen || now - lastOpticalSampleAt > OPTICAL_SAMPLE_MAX_AGE_MS) {
     invalidateVitalEstimates();
@@ -999,20 +1013,14 @@ void updateOpticalSensor() {
                     readRegister8(MAX3010X_ADDR, 0xFF, livePartId);
 
     if (!busAlive || livePartId != opticalPartId) {
-      opticalReady = false;
-      heartRateValid = false;
-      spo2Valid = false;
-      fingerPresent = false;
-      lastOpticalRetry = now;
-      Serial.println("[OPTICAL] Sensor disconnected or I2C read failed.");
-      sendBleEvent(String("SENSOR:") + opticalChipName() + ":I2C_ERROR");
+      markOpticalI2cFailure("Sensor identity check");
       return;
     }
 
     Serial.println("[OPTICAL] Device responds but FIFO stalled; reconfiguring.");
     if (!identifyAndConfigureOptical()) {
       opticalReady = false;
-      lastOpticalRetry = now;
+      lastOpticalRetry = millis();
       return;
     }
   }
@@ -1078,7 +1086,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
-  Serial.println("[FIRMWARE] vitals-acquisition-v4-20261004");
+  Serial.println("[FIRMWARE] i2c-recovery-v5-20261005");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
@@ -1112,7 +1120,9 @@ void setup() {
 
   // Probe both sensors once; failure never prevents SOS/BLE startup.
   tryInitializeMpu();
+  lastMpuRetry = millis();
   identifyAndConfigureOptical();
+  lastOpticalRetry = millis();
 
   Serial.println("[READY] BLE + SOS active. Sensor failures are non-fatal.");
   Serial.println("[READY] Press GPIO4 button three times within 1.8s for SOS.");

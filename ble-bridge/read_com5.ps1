@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ExpectedMarker = '[FIRMWARE] vitals-acquisition-v4-20261004'
+$ExpectedMarker = '[FIRMWARE] i2c-recovery-v5-20261005'
 $serial = $null
 $markerSeen = $false
 

@@ -26,7 +26,7 @@ firmware = FIRMWARE.read_text(encoding='utf-8')
 match = re.search(r'Serial\.println\("\[FIRMWARE\] ([^"]+)"\);', firmware)
 assert match, 'firmware must expose a serial build marker'
 marker = match.group(1)
-assert marker == 'vitals-acquisition-v4-20261004', f'unexpected current marker: {marker}'
+assert marker == 'i2c-recovery-v5-20261005', f'unexpected current marker: {marker}'
 expected_line = f'[FIRMWARE] {marker}'
 
 for path in [README, RECOVERY, OPTICAL]:

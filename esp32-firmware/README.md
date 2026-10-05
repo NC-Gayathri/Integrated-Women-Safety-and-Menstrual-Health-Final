@@ -1,6 +1,6 @@
 # ESP32 firmware
 
-## Current NAARI KAVACH dual-sensor BLE firmware — 4 October 2026
+## Current NAARI KAVACH dual-sensor BLE firmware — 5 October 2026
 
 For the current BLE/SOS + motion + optical integration, flash:
 
@@ -11,12 +11,14 @@ from the repository's current default branch, `master`.
 The current Serial boot marker is:
 
 ```text
-[FIRMWARE] vitals-acquisition-v4-20261004
+[FIRMWARE] i2c-recovery-v5-20261005
 ```
 
 This firmware keeps BLE and SOS available even when a sensor is unavailable, supports both MPU6050 (`WHO_AM_I=0x68`) and MPU6500 (`WHO_AM_I=0x70`) at I2C address `0x68` or `0x69`, and only reports the motion sensor READY after wake-state and ±2 g accelerometer configuration have been read back successfully.
 
-The regression suite exercises **33 sensor/SOS cases and 18 signal-acquisition cases**, plus the phone's validity/SOS parser. CI also compiles the real sketch for **DOIT ESP32 DEVKIT V1** with ESP32 Arduino core **3.3.12**. These software gates do not certify a physical USB cable, ROM-loader connection, flash operation, real sensor bus or measurement accuracy.
+**Repeated `[I2C] Read failed` or sensor dropouts?** The [v5 I2C recovery repair](../documentation/NAARI_KAVACH_I2C_RECOVERY.md) stops the optical retry storm, immediately clears invalid readings, waits two seconds before verified recovery, and cancels motion sequences interrupted by a bus failure. The guide records the actual failed capture and the physical acceptance requirements.
+
+The regression suite exercises **51 sensor/SOS cases and 19 signal-acquisition cases**, plus the phone's validity/SOS parser. CI also compiles the real sketch for **DOIT ESP32 DEVKIT V1** with ESP32 Arduino core **3.3.12**. These software gates do not certify a physical USB cable, ROM-loader connection, flash operation, real sensor bus or measurement accuracy.
 
 **Both sensors READY but `VITALS:NO_VALID_READING`?** Follow the [vitals acquisition guide](../documentation/NAARI_KAVACH_VITALS_ACQUISITION.md). This version preserves pulse history between beats, uses sample timing for buffered data, clears stale values, and prints `[SIGNAL]` raw red/IR values and the acquisition reason once per reporting interval. Update the phone app as well so `VITALS:ACQUIRING` clears old displayed readings.
 
@@ -34,7 +36,7 @@ The repository also contains older or purpose-specific firmware variants. They a
 - **`esp32_firmware/esp32_firmware.ino`** — legacy BLE GATT firmware.
 - diagnostic/scanner sketches — intentionally narrow hardware-diagnostic programs.
 
-Do not flash a legacy binary when validating `vitals-acquisition-v4-20261004`.
+Do not flash a legacy binary when validating `i2c-recovery-v5-20261005`.
 
 ---
 
