@@ -155,6 +155,39 @@ int main(int argc, char** argv) {
       testClock = failedAt + 2000;
       if (motion) { updateMpuFallDetection(); require(mpuReady, "MPU reconnect must recover after backoff"); }
       else { updateOpticalSensor(); require(opticalReady, "optical reconnect must recover after backoff"); }
+    } else if (name == "mpu_handling_spike_rejected") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68), "initial MPU must be ready");
+      delay(30000); // Beyond the 25-second fall cooldown.
+      auto acceleration = [](uint8_t x, uint8_t y, uint8_t z) {
+        Wire.mpuRegs[0x3B] = x; Wire.mpuRegs[0x3D] = y; Wire.mpuRegs[0x3F] = z;
+        delay(21); updateMpuFallDetection();
+      };
+      // Ordinary handling can momentarily look like one low-g sample followed by
+      // an impact-like spike. A single low-g sample must not arm a fall.
+      acceleration(0, 0, 0);
+      acceleration(0x60, 0x60, 0x60);
+      Wire.mpuRegs[0x3B] = Wire.mpuRegs[0x3D] = 0;
+      Wire.mpuRegs[0x3F] = 0x40;
+      delay(1001); updateMpuFallDetection();
+      require(Serial.output.find("FALL_DETECTED") == std::string::npos,
+              "short handling dip plus spike must not become a fall");
+    } else if (name == "mpu_single_stationary_sample_rejected") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68), "initial MPU must be ready");
+      delay(30000);
+      auto acceleration = [](uint8_t x, uint8_t y, uint8_t z) {
+        Wire.mpuRegs[0x3B] = x; Wire.mpuRegs[0x3D] = y; Wire.mpuRegs[0x3F] = z;
+        delay(21); updateMpuFallDetection();
+      };
+      // A plausible sustained free-fall + impact is not enough by itself.
+      // One later near-1g sample must not complete the alert.
+      for (int i = 0; i < 5; ++i) acceleration(0, 0, 0);
+      acceleration(0x60, 0x60, 0x60);
+      delay(1001);
+      acceleration(0, 0, 0x40);
+      require(Serial.output.find("FALL_DETECTED") == std::string::npos,
+              "one post-impact stationary sample must not become a fall");
     } else if (name == "mpu_fault_discards_fall" || name == "mpu_disconnect_discards_fall") {
       Wire.enableMpu(0x70);
       require(initializeMpuAt(0x68), "initial MPU must be ready");
@@ -163,8 +196,8 @@ int main(int argc, char** argv) {
         Wire.mpuRegs[0x3B] = x; Wire.mpuRegs[0x3D] = y; Wire.mpuRegs[0x3F] = z;
         delay(21); updateMpuFallDetection();
       };
-      // A real free-fall/impact sequence interrupted before the stationary check.
-      acceleration(0, 0, 0);
+      // A sustained free-fall/impact sequence interrupted before the stationary check.
+      for (int i = 0; i < 5; ++i) acceleration(0, 0, 0);
       acceleration(0x60, 0x60, 0x60);
       Wire.failReadReg = 0x3B;
       for (int i = 0; i < (name == "mpu_fault_discards_fall" ? 1 : 3); ++i) {
@@ -178,12 +211,12 @@ int main(int argc, char** argv) {
       acceleration(0, 0, 0x40);
       require(Serial.output.find("FALL_DETECTED") == std::string::npos,
               "recovery must not finish an old fall sequence across missing motion samples");
-      // A new complete sequence after recovery must still alert.
-      acceleration(0, 0, 0);
+      // A new complete sustained sequence after recovery must still alert.
+      for (int i = 0; i < 5; ++i) acceleration(0, 0, 0);
       acceleration(0x60, 0x60, 0x60);
-      delay(1001); acceleration(0, 0, 0x40);
+      for (int i = 0; i < 32; ++i) acceleration(0, 0, 0x40);
       require(Serial.output.find("FALL_DETECTED") != std::string::npos,
-              "a fresh complete fall sequence must remain detectable after recovery");
+              "a fresh sustained fall sequence must remain detectable after recovery");
     } else if (name == "mpu_runtime_backoff") {
       Wire.enableMpu(0x70);
       require(initializeMpuAt(0x68), "initial MPU must be ready");

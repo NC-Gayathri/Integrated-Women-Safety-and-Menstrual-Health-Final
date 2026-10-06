@@ -80,6 +80,10 @@ bool oldDeviceConnected = false;
 #define BUTTON_TRIPLE_CLICK_WINDOW_MS 1800
 #define BUTTON_DEBOUNCE_MS 50
 #define FALL_COOLDOWN_MS 25000
+#define FALL_FREE_FALL_MIN_MS 80
+#define FALL_FREE_FALL_MAX_MS 600
+#define FALL_POST_IMPACT_TIMEOUT_MS 2000
+#define FALL_STATIONARY_MIN_MS 600
 #define MPU_SAMPLE_INTERVAL_MS 20
 #define OPTICAL_RETRY_INTERVAL_MS 2000
 #define OPTICAL_RESET_TIMEOUT_MS 150
@@ -316,6 +320,7 @@ enum FallState {
 FallState fallState = FALL_IDLE;
 unsigned long freeFallStartedAt = 0;
 unsigned long impactStartedAt = 0;
+unsigned long stationaryStartedAt = 0;
 unsigned long lastFallTriggeredAt = 0;
 
 bool initializeMpuAt(uint8_t addr) {
@@ -371,6 +376,8 @@ bool initializeMpuAt(uint8_t addr) {
   mpuWhoAmI = whoAmI;
   mpuReady = true;
   mpuConsecutiveErrors = 0;
+  fallState = FALL_IDLE;
+  stationaryStartedAt = 0;
 
   Serial.printf("[MPU] %s ready at 0x%02X (WHO_AM_I=0x%02X, accel=+/-2g).\n",
                 chipName, addr, whoAmI);
@@ -407,6 +414,7 @@ void updateMpuFallDetection() {
     // Missing motion samples break the free-fall/impact/stationary sequence.
     // Never finish a pre-fault sequence with post-recovery acceleration.
     fallState = FALL_IDLE;
+    stationaryStartedAt = 0;
     if (++mpuConsecutiveErrors >= 3) {
       const char* failedChip = mpuChipName();
       mpuReady = false;
@@ -431,6 +439,7 @@ void updateMpuFallDetection() {
 
   if (now - lastFallTriggeredAt < FALL_COOLDOWN_MS) {
     fallState = FALL_IDLE;
+    stationaryStartedAt = 0;
     return;
   }
 
@@ -442,23 +451,44 @@ void updateMpuFallDetection() {
       }
       break;
 
-    case FALL_FREE_FALL:
-      if (magnitude > 2.50f) {
+    case FALL_FREE_FALL: {
+      const unsigned long freeFallMs = now - freeFallStartedAt;
+      if (magnitude < 0.50f) {
+        if (freeFallMs > FALL_FREE_FALL_MAX_MS) {
+          fallState = FALL_IDLE;
+        }
+      } else if (freeFallMs >= FALL_FREE_FALL_MIN_MS &&
+                 freeFallMs <= FALL_FREE_FALL_MAX_MS &&
+                 magnitude > 2.50f) {
         fallState = FALL_IMPACT;
         impactStartedAt = now;
-      } else if (now - freeFallStartedAt > 600) {
+        stationaryStartedAt = 0;
+      } else {
+        // A single low-g sample followed by ordinary handling is not a fall.
         fallState = FALL_IDLE;
       }
       break;
+    }
 
     case FALL_IMPACT:
-      if (now - impactStartedAt > 1000) {
-        if (magnitude > 0.80f && magnitude < 1.30f) {
+      if (now - impactStartedAt > FALL_POST_IMPACT_TIMEOUT_MS) {
+        fallState = FALL_IDLE;
+        stationaryStartedAt = 0;
+        break;
+      }
+
+      if (magnitude > 0.80f && magnitude < 1.30f) {
+        if (stationaryStartedAt == 0) stationaryStartedAt = now;
+        if (now - stationaryStartedAt >= FALL_STATIONARY_MIN_MS) {
           lastFallTriggeredAt = now;
           sendBleEvent("FALL_DETECTED");
           pulseLed(500);
+          fallState = FALL_IDLE;
+          stationaryStartedAt = 0;
         }
-        fallState = FALL_IDLE;
+      } else {
+        // Require a continuous post-impact near-1g interval, not one sample.
+        stationaryStartedAt = 0;
       }
       break;
   }
@@ -1137,7 +1167,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
-  Serial.println("[FIRMWARE] weak-contact-v7-20261005");
+  Serial.println("[FIRMWARE] fall-guard-v8-20261006");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);

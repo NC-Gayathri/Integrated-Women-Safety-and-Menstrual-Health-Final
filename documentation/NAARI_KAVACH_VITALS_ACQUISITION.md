@@ -21,7 +21,7 @@ The authoritative sketch remains
 on `master`. The current boot marker, including the v5 recovery and v6 settling repairs, is:
 
 ```text
-[FIRMWARE] weak-contact-v7-20261005
+[FIRMWARE] fall-guard-v8-20261006
 ```
 
 Regression tests reproduced these defects in the previous signal path:
