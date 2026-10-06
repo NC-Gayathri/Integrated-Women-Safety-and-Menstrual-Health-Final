@@ -9,7 +9,7 @@ The repository default branch is **master**. The authoritative integration sketc
 The required boot marker is:
 
 ```text
-[FIRMWARE] weak-contact-v7-20261005
+[FIRMWARE] fall-guard-v8-20261006
 ```
 
 Software/CI closure and physical-board closure are separate evidence gates. The repository now has bounded software evidence for MPU6050/MPU6500 compatibility, optical initialization/error recovery, BLE/SOS continuity and cleanup safety. A successful CI run does **not** prove that a particular MAX3010x module, USB cable or flashed ESP32 works physically.
@@ -41,7 +41,7 @@ The earlier v3 log reached both `SENSOR:MAX30102:READY` and `SENSOR:MPU6500:READ
 - Shutdown, reset, mode, sample and LED configuration are verified by read-back before READY.
 - Disconnects invalidate stale vital readings and schedule reinitialization.
 - Failed FIFO metadata reads also invalidate immediately and wait two seconds before verified recovery; a healthy empty FIFO is not a fault.
-- Motion read failures cancel incomplete fall sequences so recovery cannot complete an old impact as a new alert.
+- Motion read failures cancel incomplete fall sequences so recovery cannot complete an old impact as a new alert. Fall detection also requires sustained free-fall and sustained post-impact near-1g stillness; isolated handling spikes cannot complete an alert.
 - No-finger conditions do not invent heart-rate or SpO2 values.
 - SOS button polling remains serviced around bounded sensor transactions.
 - Motion-sensor failure and optical-sensor failure remain non-fatal to BLE/SOS startup.
@@ -59,7 +59,7 @@ python3 scripts/test_naari_upload_recovery.py
 node scripts/test_naari_ble_vitals.cjs
 ```
 
-The current sensor behaviour runner executes **51/51** deterministic cases around the real integration sketch through a controlled hardware boundary. Coverage includes the existing optical cases plus MPU6050 compatibility, MPU6500 `WHO_AM_I=0x70`, address `0x69`, unsupported identity rejection, wake/configuration read-back failures, reconnect recovery and SOS service during motion-sensor initialization.
+The current sensor behaviour runner executes **53/53** deterministic cases around the real integration sketch through a controlled hardware boundary. Coverage includes the existing optical cases plus MPU6050 compatibility, MPU6500 `WHO_AM_I=0x70`, address `0x69`, unsupported identity rejection, wake/configuration read-back failures, reconnect recovery and SOS service during motion-sensor initialization.
 
 The separate vitals runner covers 30 acquisition cases using artificial waveforms only at the test boundary. The BLE parser regression requires `npm ci` first. These tests establish software behavior, not accuracy on a human finger.
 
@@ -80,7 +80,7 @@ Replace the example port with the port proven by unplug/replug in Windows Device
 After successful flash, release BOOT, reset the board and capture Serial at **115200 baud**. The log must contain:
 
 ```text
-[FIRMWARE] weak-contact-v7-20261005
+[FIRMWARE] fall-guard-v8-20261006
 ```
 
 If that exact line is absent, do not use the subsequent sensor output as evidence for the current repair.
@@ -128,7 +128,7 @@ Physical closure requires all evidence relevant to the claim being closed:
 
 | Claim | Minimum physical evidence |
 |---|---|
-| Correct firmware installed | current `weak-contact-v7-20261005` boot marker |
+| Correct firmware installed | current `fall-guard-v8-20261006` boot marker |
 | MPU6500 fixed | real `WHO_AM_I=0x70` device reaches chip-specific READY after verified ±2 g configuration |
 | Optical sensor fixed | real MAX30100/MAX30102 identification + chip-specific READY |
 | Vitals acquisition works | current marker, real `[SIGNAL]` capture, changing valid HR/SpO2 with stable contact, and stale values cleared when contact is removed |
