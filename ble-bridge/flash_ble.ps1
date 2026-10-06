@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^COM\\d+$')]
+    [ValidatePattern('^COM\d+$')]
     [string]$Port,
 
     [ValidateRange(9600, 921600)]
@@ -14,7 +14,7 @@ $ErrorActionPreference = 'Stop'
 $ExpectedMarker = '[FIRMWARE] fall-guard-v8-20261006'
 $Fqbn = 'esp32:esp32:esp32doit-devkit-v1'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$SketchDir = Join-Path $RepoRoot 'esp32-firmware\\naari_kavach_dual_sensor_ble_test'
+$SketchDir = Join-Path $RepoRoot 'esp32-firmware\naari_kavach_dual_sensor_ble_test'
 $SketchFile = Join-Path $SketchDir 'naari_kavach_dual_sensor_ble_test.ino'
 $BuildDir = Join-Path $env:TEMP 'naari-kavach-dual-sensor-build'
 
@@ -23,8 +23,8 @@ function Resolve-ArduinoCli {
     if ($command) { return $command.Source }
 
     $candidates = @(
-        (Join-Path $env:LOCALAPPDATA 'Programs\\Arduino IDE\\resources\\app\\lib\\backend\\resources\\arduino-cli.exe'),
-        (Join-Path $env:ProgramFiles 'Arduino IDE\\resources\\app\\lib\\backend\\resources\\arduino-cli.exe')
+        (Join-Path $env:LOCALAPPDATA 'Programs\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe'),
+        (Join-Path $env:ProgramFiles 'Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe')
     )
     foreach ($candidate in $candidates) {
         if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate }
@@ -33,10 +33,10 @@ function Resolve-ArduinoCli {
 }
 
 function Resolve-Esptool {
-    $preferred = Join-Path $env:LOCALAPPDATA 'Arduino15\\packages\\esp32\\tools\\esptool_py\\5.3.1\\esptool.exe'
+    $preferred = Join-Path $env:LOCALAPPDATA 'Arduino15\packages\esp32\tools\esptool_py\5.3.1\esptool.exe'
     if (Test-Path -LiteralPath $preferred) { return $preferred }
 
-    $root = Join-Path $env:LOCALAPPDATA 'Arduino15\\packages\\esp32\\tools\\esptool_py'
+    $root = Join-Path $env:LOCALAPPDATA 'Arduino15\packages\esp32\tools\esptool_py'
     if (-not (Test-Path -LiteralPath $root)) {
         throw 'ESP32 esptool installation was not found under Arduino15. Install ESP32 Arduino core 3.3.12 first.'
     }
