@@ -31,12 +31,14 @@ The repaired helper is fail-closed:
 
 1. The caller must explicitly select the Windows COM port.
 2. It verifies that the port currently exists.
-3. It compiles exactly `esp32-firmware/naari_kavach_dual_sensor_ble_test` for the DOIT ESP32 DEVKIT V1 target.
-4. It requires manual ROM-download-mode entry.
-5. It runs a non-writing `read-mac` preflight at **115200 baud**.
-6. **No flash write is attempted if that preflight fails.**
-7. Only after the ROM loader responds does it write the freshly compiled merged image.
-8. Physical acceptance still requires the current firmware marker after reset.
+3. It refuses stale local source unless the sketch contains the current firmware marker.
+4. It compiles exactly `esp32-firmware/naari_kavach_dual_sensor_ble_test` for the DOIT ESP32 DEVKIT V1 target.
+5. It inspects the actual merged binary bytes and refuses to flash unless that compiled image contains the current firmware marker.
+6. It requires manual ROM-download-mode entry.
+7. It runs a non-writing `read-mac` preflight at **115200 baud**.
+8. **No flash write is attempted if that preflight fails.**
+9. Only after the ROM loader responds does it write the freshly compiled marker-verified merged image.
+10. It then opens a physical serial verification window and refuses success unless the real ESP32 emits the current firmware marker.
 
 ## Canonical recovery procedure
 
@@ -101,19 +103,19 @@ Do these in order, changing wiring only while all power is disconnected:
 
 If a known-good data cable, direct USB port, correct Windows port, manual BOOT/EN sequence and isolated board still cannot return a ROM-loader identity, the remaining problem is local to the physical USB/serial/reset/power/board path. Repository code cannot make a host receive bytes from a board that is not entering or exposing its ROM loader.
 
-## After a successful flash
+## After the flash write
 
-Release BOOT. If the application does not start automatically, tap EN/RESET once.
+The same `flash_ble.ps1` command now performs the boot-identity gate itself. During its final verification window, release BOOT and tap EN/RESET once. The helper exits with code **3** instead of claiming success if it cannot observe the current marker from the real board.
 
-Then run:
+For a longer diagnostic capture after identity is proven, you can still run:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\ble-bridge\read_com5.ps1 -Port COM5
 ```
 
-Again, substitute the actual verified port. The historical filename is retained for compatibility; the script itself is now port-parameterized.
+Again, substitute the actual verified port. The historical filename is retained for compatibility; the reader is port-parameterized.
 
-With BOOT released, tap EN/RESET. Physical boot acceptance requires:
+Physical boot acceptance requires:
 
 ```text
 [FIRMWARE] fall-guard-v8-20261006
