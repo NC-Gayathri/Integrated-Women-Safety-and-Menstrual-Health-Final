@@ -376,6 +376,8 @@ bool initializeMpuAt(uint8_t addr) {
   mpuWhoAmI = whoAmI;
   mpuReady = true;
   mpuConsecutiveErrors = 0;
+  fallState = FALL_IDLE;
+  stationaryStartedAt = 0;
 
   Serial.printf("[MPU] %s ready at 0x%02X (WHO_AM_I=0x%02X, accel=+/-2g).\n",
                 chipName, addr, whoAmI);
