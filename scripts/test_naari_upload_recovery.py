@@ -47,6 +47,11 @@ write_pos = flash.lower().find('write-flash')
 assert read_mac_pos >= 0, 'flash helper must prove ROM-loader communication with read-mac before writing'
 assert write_pos > read_mac_pos, 'write-flash must occur only after the read-mac preflight'
 assert 'no-reset' in flash.lower(), 'manual BOOT/EN recovery must preserve selected download mode'
+assert 'Assert-CompiledImageMarker' in flash, 'flash helper must inspect the compiled image before writing it'
+assert 'ReadAllBytes' in flash, 'compiled-image marker verification must inspect the actual merged binary bytes'
+assert 'Verify-FlashedFirmwareMarker' in flash, 'flash helper must verify the real post-flash serial boot automatically'
+assert 'SerialPort' in flash, 'post-flash verification must read the physical serial port'
+assert 'exit 3' in flash, 'missing post-flash marker must fail closed instead of reporting success'
 
 for path in [SERIAL, RESET]:
     text = path.read_text(encoding='utf-8')
