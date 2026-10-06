@@ -18,7 +18,7 @@ That failure happens **before the new application firmware can run**. It does no
 The current acceptance marker is:
 
 ```text
-[FIRMWARE] weak-contact-v7-20261005
+[FIRMWARE] fall-guard-v8-20261006
 ```
 
 Any older firmware marker is stale and must not be used as physical acceptance evidence.
@@ -116,7 +116,7 @@ Again, substitute the actual verified port. The historical filename is retained 
 With BOOT released, tap EN/RESET. Physical boot acceptance requires:
 
 ```text
-[FIRMWARE] weak-contact-v7-20261005
+[FIRMWARE] fall-guard-v8-20261006
 ```
 
 For the reported motion device, MPU acceptance then requires the current firmware to identify and configure the part, for example:
