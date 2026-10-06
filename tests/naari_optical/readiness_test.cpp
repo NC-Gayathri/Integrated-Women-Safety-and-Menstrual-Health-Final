@@ -155,6 +155,23 @@ int main(int argc, char** argv) {
       testClock = failedAt + 2000;
       if (motion) { updateMpuFallDetection(); require(mpuReady, "MPU reconnect must recover after backoff"); }
       else { updateOpticalSensor(); require(opticalReady, "optical reconnect must recover after backoff"); }
+    } else if (name == "mpu_handling_spike_rejected") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68), "initial MPU must be ready");
+      delay(30000); // Beyond the 25-second fall cooldown.
+      auto acceleration = [](uint8_t x, uint8_t y, uint8_t z) {
+        Wire.mpuRegs[0x3B] = x; Wire.mpuRegs[0x3D] = y; Wire.mpuRegs[0x3F] = z;
+        delay(21); updateMpuFallDetection();
+      };
+      // Ordinary handling can momentarily look like one low-g sample followed by
+      // an impact-like spike. A single low-g sample must not arm a fall.
+      acceleration(0, 0, 0);
+      acceleration(0x60, 0x60, 0x60);
+      Wire.mpuRegs[0x3B] = Wire.mpuRegs[0x3D] = 0;
+      Wire.mpuRegs[0x3F] = 0x40;
+      delay(1001); updateMpuFallDetection();
+      require(Serial.output.find("FALL_DETECTED") == std::string::npos,
+              "short handling dip plus spike must not become a fall");
     } else if (name == "mpu_fault_discards_fall" || name == "mpu_disconnect_discards_fall") {
       Wire.enableMpu(0x70);
       require(initializeMpuAt(0x68), "initial MPU must be ready");
