@@ -61,7 +61,7 @@ node scripts/test_naari_ble_vitals.cjs
 
 The current sensor behaviour runner executes **53/53** deterministic cases around the real integration sketch through a controlled hardware boundary. Coverage includes the existing optical cases plus MPU6050 compatibility, MPU6500 `WHO_AM_I=0x70`, address `0x69`, unsupported identity rejection, wake/configuration read-back failures, reconnect recovery and SOS service during motion-sensor initialization.
 
-The separate vitals runner covers 30 acquisition cases using artificial waveforms only at the test boundary. The BLE parser regression requires `npm ci` first. These tests establish software behavior, not accuracy on a human finger.
+The separate vitals runner covers 31 acquisition cases using artificial waveforms only at the test boundary. The BLE parser regression requires `npm ci` first. These tests establish software behavior, not accuracy on a human finger.
 
 The `NAARI KAVACH Closure Gate` also compiles the real sketch for `esp32:esp32:esp32doit-devkit-v1` using ESP32 Arduino core **3.3.12**, checks the BLE application TypeScript/lint contract, and builds the native Android debug APK. These are software/build gates only.
 
@@ -75,9 +75,9 @@ The canonical physical recovery helper is:
 powershell -ExecutionPolicy Bypass -File .\ble-bridge\flash_ble.ps1 -Port COM5
 ```
 
-Replace the example port with the port proven by unplug/replug in Windows Device Manager. The helper compiles the current dual-sensor sketch, performs a non-writing ROM-loader `read-mac` preflight, and refuses to write flash if the loader cannot be reached.
+Replace the example port with the port proven by unplug/replug in Windows Device Manager. The helper verifies the local source marker, compiles the current dual-sensor sketch, verifies the marker inside the merged binary, performs a non-writing ROM-loader `read-mac` preflight, writes only after that succeeds, and then verifies the marker from the real board over Serial. During the final verification window, release BOOT and tap EN/RESET once.
 
-After successful flash, release BOOT, reset the board and capture Serial at **115200 baud**. The log must contain:
+The helper must observe:
 
 ```text
 [FIRMWARE] fall-guard-v8-20261006
