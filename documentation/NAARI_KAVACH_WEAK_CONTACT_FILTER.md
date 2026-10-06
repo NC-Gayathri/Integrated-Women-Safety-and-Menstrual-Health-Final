@@ -1,6 +1,6 @@
 # Weak-contact numeric-vitals rejection — 5 October 2026
 
-Current firmware: `[FIRMWARE] weak-contact-v7-20261005`.
+Current firmware: `[FIRMWARE] fall-guard-v8-20261006`.
 
 The physical v6 capture proved a strong valid phase around RED 202k / IR 230k,
 then showed a degraded optical region around 3–5k counts that remained above
