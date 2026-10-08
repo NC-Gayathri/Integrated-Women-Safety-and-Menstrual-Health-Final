@@ -8,6 +8,16 @@ void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
 }
 
+size_t occurrences(const std::string& haystack, const std::string& needle) {
+  size_t count = 0;
+  size_t pos = 0;
+  while ((pos = haystack.find(needle, pos)) != std::string::npos) {
+    ++count;
+    pos += needle.size();
+  }
+  return count;
+}
+
 // Both verified configurations produce 100 samples/second. All artificial data
 // stays in this test boundary; firmware must only consume hardware FIFO samples.
 // 100 frames/beat = 60 BPM; 80 frames/beat = 75 BPM. AC/DC ratio 0.6 -> 95% in
@@ -98,18 +108,23 @@ int main(int argc, char** argv) {
       require(heartRateValid && filteredBpm >= 59 && filteredBpm <= 61 && spo2Valid,
               "a small pulse at the capture's high baseline must remain detectable");
     } else if (name == "settling_report") {
+      Serial.output.clear();
       delay(10); processOpticalSample(200000, 240000);
+      require(Serial.output.find("[FINGER] DETECTED") != std::string::npos &&
+              Serial.output.find("[EVENT] VITALS:ACQUIRING") != std::string::npos,
+              "new contact must announce one acquisition transition");
       report();
       noNumbers();
       require(Serial.output.find("reason=SETTLING") != std::string::npos &&
-              Serial.output.find("[EVENT] VITALS:ACQUIRING") != std::string::npos,
-              "settling must report acquisition consistently in Serial and BLE");
+              Serial.output.find("[EVENT] VITALS:ACQUIRING") == std::string::npos,
+              "settling diagnostics may print while contact exists but must not repeat BLE ACQUIRING");
     } else if (name == "settling_samples_expired") {
       delay(10); processOpticalSample(200000, 240000);
       delay(600); report(); noNumbers();
-      require(Serial.output.find("reason=NO_SAMPLES") != std::string::npos &&
+      require(std::string(opticalSignalReason()) == "NO_SAMPLES" &&
+              Serial.output.find("[FINGER] REMOVED (sample timeout)") != std::string::npos &&
               Serial.output.find("[EVENT] VITALS:NO_VALID_READING") != std::string::npos,
-              "missing samples must end settling and report the actual loss of data");
+              "missing samples must emit one removal/clear transition and retain NO_SAMPLES diagnostics");
     } else if (name == "step_flat_high_to_low") {
       levelPulse(209000, 242000);
       require(heartRateValid && spo2Valid, "fixture must acquire at the capture's high baseline");
@@ -151,6 +166,38 @@ int main(int argc, char** argv) {
       pulse(1600, 25);
       report();
       noNumbers();
+    } else if (name == "quiet_no_finger") {
+      Serial.output.clear();
+      for (int i = 0; i < 400; ++i) {
+        delay(10);
+        processOpticalSample(2300, 2200);
+      }
+      report();
+      noNumbers();
+      require(Serial.output.find("[SIGNAL]") == std::string::npos &&
+              Serial.output.find("VITALS:NO_VALID_READING") == std::string::npos &&
+              Serial.output.find("VITALS:ACQUIRING") == std::string::npos,
+              "uncovered sensor must remain quiet instead of emitting periodic idle vitals");
+    } else if (name == "finger_transition_events") {
+      for (int i = 0; i < 20; ++i) {
+        delay(10); processOpticalSample(2300, 2200);
+      }
+      Serial.output.clear();
+      delay(10); processOpticalSample(30000, 60000);
+      for (int i = 0; i < 20; ++i) {
+        delay(10); processOpticalSample(30000, 60000);
+      }
+      require(occurrences(Serial.output, "[FINGER] DETECTED") == 1 &&
+              occurrences(Serial.output, "[EVENT] VITALS:ACQUIRING") == 1,
+              "one finger placement must emit exactly one detected/acquiring transition");
+      Serial.output.clear();
+      delay(10); processOpticalSample(2300, 2200);
+      for (int i = 0; i < 20; ++i) {
+        delay(10); processOpticalSample(2300, 2200);
+      }
+      require(occurrences(Serial.output, "[FINGER] REMOVED") == 1 &&
+              occurrences(Serial.output, "[EVENT] VITALS:NO_VALID_READING") == 1,
+              "one finger removal must emit exactly one removal/clear transition");
     } else if (name == "dark" || name == "flat_light") {
       for (int i = 0; i < 400; ++i) {
         delay(10);
@@ -195,12 +242,15 @@ int main(int argc, char** argv) {
         lastOpticalSampleAt = millis();
         reason = name == "reason_low_light" ? "reason=LOW_LIGHT" : "reason=WEAK_PULSE";
       }
-      report();
+      // Runtime idle logging is quiet in v9; explicit diagnostics still expose
+      // the complete reason/raw signal when intentionally requested in tests.
+      Serial.output.clear();
+      reportOpticalSignal();
       require(Serial.output.find(reason) != std::string::npos,
-              "invalid-reading report must explain whether samples, light, or pulse are missing");
+              "explicit signal diagnostics must preserve the reason code");
       require(Serial.output.find("red=") != std::string::npos &&
               Serial.output.find("ir=") != std::string::npos,
-              "signal report must expose actual red/IR values for the next hardware capture");
+              "explicit diagnostics must expose actual red/IR values");
       noNumbers();
     } else if (name == "partial_report") {
       pulse(); require(heartRateValid && spo2Valid, "fixture must first acquire both values");
