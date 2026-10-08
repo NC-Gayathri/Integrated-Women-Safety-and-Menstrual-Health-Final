@@ -11,8 +11,10 @@ from the repository's current default branch, `master`.
 The current Serial boot marker is:
 
 ```text
-[FIRMWARE] fall-guard-v8-20261006
+[FIRMWARE] quiet-events-v9-20261008
 ```
+
+Idle optical reporting is event-driven in v9: with no finger present the firmware keeps sampling for health/recovery but does not print periodic LOW_LIGHT/NO_VALID_READING lines. Finger placement/removal, numeric vitals, SOS/fall, BLE transitions, and genuine sensor faults remain visible.
 
 This firmware keeps BLE and SOS available even when a sensor is unavailable, supports both MPU6050 (`WHO_AM_I=0x68`) and MPU6500 (`WHO_AM_I=0x70`) at I2C address `0x68` or `0x69`, and only reports the motion sensor READY after wake-state and ±2 g accelerometer configuration have been read back successfully.
 
@@ -38,7 +40,7 @@ The repository also contains older or purpose-specific firmware variants. They a
 - **`esp32_firmware/esp32_firmware.ino`** — legacy BLE GATT firmware.
 - diagnostic/scanner sketches — intentionally narrow hardware-diagnostic programs.
 
-Do not flash a legacy binary when validating `fall-guard-v8-20261006`.
+Do not flash a legacy binary when validating `quiet-events-v9-20261008`.
 
 ---
 
