@@ -11,7 +11,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ExpectedMarker = '[FIRMWARE] fall-guard-v8-20261006'
+$ExpectedMarker = '[FIRMWARE] quiet-events-v9-20261008'
 $Fqbn = 'esp32:esp32:esp32doit-devkit-v1'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $SketchDir = Join-Path $RepoRoot 'esp32-firmware\naari_kavach_dual_sensor_ble_test'

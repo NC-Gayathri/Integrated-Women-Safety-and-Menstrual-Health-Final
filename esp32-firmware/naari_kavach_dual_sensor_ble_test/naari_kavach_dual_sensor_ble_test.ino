@@ -516,7 +516,6 @@ uint8_t opticalRevisionId = 0;
 unsigned long lastOpticalRetry = 0;
 unsigned long lastVitalsReport = 0;
 unsigned long lastSensorStatusReport = 0;
-unsigned long lastHealthSnapshotReport = 0;
 unsigned long lastOpticalSampleAt = 0;
 
 // Real-signal processing state.
@@ -871,7 +870,19 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
     opticalSettlingSamples = 0;
     irDc = redDc = irEnvelope = previousIrAc = 0.0;
     previousSlopePositive = false;
+
+    // Idle/no-finger sampling is intentionally silent. Only announce the
+    // transition once so Serial/BLE do not emit one message every second.
+    if (hadContact) {
+      Serial.println("[FINGER] REMOVED");
+      sendBleEvent("VITALS:NO_VALID_READING");
+    }
     return;
+  }
+
+  if (!hadContact) {
+    Serial.println("[FINGER] DETECTED");
+    sendBleEvent("VITALS:ACQUIRING");
   }
   // A gross baseline change can be placement, light, or motion rather than a
   // pulse. This 10% quality heuristic is not motion cancellation/calibration.
@@ -887,8 +898,10 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
     irEnvelope = previousIrAc = 0.0;
     previousSlopePositive = false;
     opticalSettlingSamples = OPTICAL_SETTLE_SAMPLES;
-    // Clear the phone at the sample that invalidated it, even between reports.
-    if (hadValidEstimate) sendBleEvent("VITALS:ACQUIRING");
+    // A new finger already emitted ACQUIRING above. For an established
+    // contact, only clear a previously valid reading when a real level jump
+    // invalidates it; do not repeat ACQUIRING for ordinary startup settling.
+    if (levelChanged && hadValidEstimate) sendBleEvent("VITALS:ACQUIRING");
     return;
   }
 
@@ -1071,9 +1084,21 @@ void updateOpticalSensor() {
   if (!opticalReady) return; // Any FIFO/metadata fault requires reset before reads.
   now = millis(); // I2C work advances time after the sample's receipt timestamp.
   if (!opticalSampleSeen || now - lastOpticalSampleAt > OPTICAL_SAMPLE_MAX_AGE_MS) {
+    const bool contactTimedOut = fingerPresent;
+    const bool hadValidEstimate = heartRateValid || spo2Valid;
     invalidateVitalEstimates();
     fingerPresent = false;
     opticalSettlingSamples = 0;
+
+    // A sample stream disappearing while a finger was present is a real
+    // transition, not an idle heartbeat. Announce it once and clear the phone.
+    if (contactTimedOut) {
+      Serial.println("[FINGER] REMOVED (sample timeout)");
+      reportOpticalSignal();
+    }
+    if (contactTimedOut || hadValidEstimate) {
+      sendBleEvent("VITALS:NO_VALID_READING");
+    }
   }
 
   // A configured optical sensor should keep producing FIFO samples even with
@@ -1100,18 +1125,20 @@ void updateOpticalSensor() {
 
   if (now - lastVitalsReport >= VITALS_REPORT_INTERVAL_MS) {
     lastVitalsReport = now;
+
+    // The optical sensor keeps sampling while uncovered so disconnects can
+    // still be detected, but idle/no-finger data is not user-facing output.
+    if (!fingerPresent) return;
+
     reportOpticalSignal();
 
-    if (opticalSettlingSamples > 0) {
-      sendBleEvent("VITALS:ACQUIRING");
-      return;
-    }
+    // DETECTED emitted one ACQUIRING event. Do not repeat it every second while
+    // the same finger is merely settling or while contact quality is weak.
+    if (opticalSettlingSamples > 0) return;
 
-    if (!fingerPresent ||
-        redDc < OPTICAL_VITAL_MIN_RED_DC ||
+    if (redDc < OPTICAL_VITAL_MIN_RED_DC ||
         irDc < OPTICAL_VITAL_MIN_IR_DC ||
         (!heartRateValid && irEnvelope <= 10.0)) {
-      sendBleEvent("VITALS:NO_VALID_READING");
       return;
     }
 
@@ -1167,7 +1194,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
-  Serial.println("[FIRMWARE] fall-guard-v8-20261006");
+  Serial.println("[FIRMWARE] quiet-events-v9-20261008");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
@@ -1206,6 +1233,7 @@ void setup() {
   lastOpticalRetry = millis();
 
   Serial.println("[READY] BLE + SOS active. Sensor failures are non-fatal.");
+  Serial.println("[READY] Quiet mode: idle no-finger vitals are suppressed.");
   Serial.println("[READY] Press GPIO4 button three times within 1.8s for SOS.");
 }
 
@@ -1218,8 +1246,9 @@ void loop() {
   if (deviceConnected && !oldDeviceConnected) {
     oldDeviceConnected = true;
     sendBleEvent("STATUS:ONLINE");
+    // Health is announced once on subscription; subsequent READY/ERROR changes
+    // are already event-driven by the sensor state machines.
     sendSensorHealthSnapshot();
-    lastHealthSnapshotReport = millis();
   } else if (!deviceConnected && oldDeviceConnected) {
     oldDeviceConnected = false;
     pServer->startAdvertising();
@@ -1231,14 +1260,6 @@ void loop() {
 
   updateOpticalSensor();
   updateButtonState();
-
-  // Re-announce health after the client has had time to subscribe. This also
-  // makes a lost/truncated first notification self-healing.
-  if (deviceConnected &&
-      (millis() - lastHealthSnapshotReport >= SENSOR_STATUS_INTERVAL_MS)) {
-    lastHealthSnapshotReport = millis();
-    sendSensorHealthSnapshot();
-  }
 
   updateLed();
 

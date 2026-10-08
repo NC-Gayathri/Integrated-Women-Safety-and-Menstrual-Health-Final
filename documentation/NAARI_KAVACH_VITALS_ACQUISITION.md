@@ -21,8 +21,14 @@ The authoritative sketch remains
 on `master`. The current boot marker, including the v5 recovery and v6 settling repairs, is:
 
 ```text
-[FIRMWARE] fall-guard-v8-20261006
+[FIRMWARE] quiet-events-v9-20261008
 ```
+
+Runtime reporting is intentionally quiet while the optical sensor is uncovered. The
+firmware emits a one-shot `[FINGER] DETECTED` + `VITALS:ACQUIRING` transition,
+reports useful signal/vitals while contact exists, and emits one
+`[FINGER] REMOVED` + `VITALS:NO_VALID_READING` transition on removal or sample
+timeout. Sensor READY/ERROR and SOS/fall events remain event-driven.
 
 Regression tests reproduced these defects in the previous signal path:
 

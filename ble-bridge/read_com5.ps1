@@ -8,7 +8,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ExpectedMarker = '[FIRMWARE] fall-guard-v8-20261006'
+$ExpectedMarker = '[FIRMWARE] quiet-events-v9-20261008'
 $serial = $null
 $markerSeen = $false
 
