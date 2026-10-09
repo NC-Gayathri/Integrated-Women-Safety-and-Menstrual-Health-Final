@@ -65,4 +65,51 @@ assert.equal(backendEvents.at(-1).fallDetected, true, 'backend fall flag must be
 for (const status of ['SENSOR:MAX30102:NOT_READY', 'SENSOR:MAX30100:I2C_ERROR']) {
   acquire(); receive(status); assertCleared();
 }
-console.log('BLE vitals, SOS, and fall event behavior PASS');
+// Mock the actual connection registration boundary: monitor() can throw, or
+// return no subscription, even when a device and exact GATT UUIDs were found.
+// Neither outcome may be advertised to the user as subscribed/ready.
+(async () => {
+  const char = {
+    uuid: service.targetCharUUID,
+    isNotifiable: true,
+    monitor() { throw new Error('simulated native subscription failure'); },
+  };
+  const fakeService = {
+    uuid: service.targetServiceUUID,
+    characteristics: async () => [char],
+  };
+  let cancellations = 0;
+  const connection = {
+    requestMTU: async () => 64,
+    onDisconnected() {},
+    discoverAllServicesAndCharacteristics: async () => ({
+      services: async () => [fakeService],
+    }),
+    cancelConnection: async () => { cancellations++; },
+  };
+  const device = { name: 'NAARI_KAVACH', connect: async () => connection };
+
+  await service.connectToDevice(device);
+  assert.equal(service.diagnostics.notificationsSubscribed, false,
+    'native monitor exception must not be misreported as subscribed');
+  assert.equal(service.getConnectionState(), 'ERROR',
+    'native monitor exception must be surfaced as a connection failure');
+  assert.equal(cancellations, 1, 'failed GATT subscription must tear down the connection');
+
+  char.monitor = () => undefined;
+  await service.connectToDevice(device);
+  assert.equal(service.diagnostics.notificationsSubscribed, false,
+    'missing native monitor handle must fail closed');
+
+  char.monitor = () => ({ remove() {} });
+  await service.connectToDevice(device);
+  assert.equal(service.diagnostics.notificationsSubscribed, true,
+    'registered native monitor permits subscribed state');
+  assert.equal(service.getConnectionState(), 'SUBSCRIBED TO SENSOR NOTIFICATIONS',
+    'registered notification handle must preserve original successful flow');
+
+  console.log('BLE vitals, SOS, fall parser and subscription-error state PASS');
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
