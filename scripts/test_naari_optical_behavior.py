@@ -31,6 +31,7 @@ CASES = [
     'mpu_fault_discards_fall', 'mpu_disconnect_discards_fall',
     'mpu6050_single_axis_drop', 'mpu6500_single_axis_drop',
     'mpu_handling_spike_rejected', 'mpu_single_stationary_sample_rejected',
+    'mpu_first_fall_after_boot', 'mpu_postimpact_gap_rejected', 'mpu_first_fall_cooldown',
 ]
 with tempfile.TemporaryDirectory(prefix='naari-sensors-') as temporary:
     executable = str(Path(temporary) / 'readiness-test')
