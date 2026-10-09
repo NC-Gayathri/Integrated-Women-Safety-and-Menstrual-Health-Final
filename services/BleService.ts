@@ -434,7 +434,7 @@ class BleService {
     this.diagnostics.lastRawMessage = text;
 
     // 1. STATUS:ONLINE
-    if (text === 'STATUS:ONLINE' || text.toUpperCase().startsWith('STATUS:ONLINE')) {
+    if (text.toUpperCase() === 'STATUS:ONLINE') {
       console.log(`[BLE DECODED] ${text}`);
       console.log('[BLE EVENT] ESP32 is ONLINE');
       this.isEsp32Online = true;
@@ -450,7 +450,7 @@ class BleService {
     }
 
     // 2. Physical SOS button pressed: "SOS"
-    if (text === 'SOS' || text.toUpperCase() === 'SOS' || text.toUpperCase().startsWith('SOS')) {
+    if (text.toUpperCase() === 'SOS') {
       console.log(`[BLE DECODED] ${text}`);
       console.log('[BLE EVENT] Physical SOS button pressed');
       this.diagnostics.lastSensorEvent = 'PHYSICAL SOS BUTTON';
@@ -468,7 +468,8 @@ class BleService {
     if (text.toUpperCase().startsWith('HEART_RATE:')) {
       console.log(`[BLE DECODED] ${text}`);
       const parts = text.split(':');
-      const bpmNumber = parts.length > 1 ? parseInt(parts[1].trim(), 10) : NaN;
+      const bpmNumber = parts.length === 2 && /^\d{1,3}$/.test(parts[1].trim())
+        ? Number(parts[1].trim()) : NaN;
 
       if (!isNaN(bpmNumber) && bpmNumber >= 30 && bpmNumber <= 230) {
         this.latestBpm = bpmNumber;
@@ -492,7 +493,8 @@ class BleService {
     // 4. Real SpO2 reading: "SPO2:<percent>"
     if (text.toUpperCase().startsWith('SPO2:')) {
       const parts = text.split(':');
-      const spo2Number = parts.length > 1 ? parseInt(parts[1].trim(), 10) : NaN;
+      const spo2Number = parts.length === 2 && /^\d{1,3}$/.test(parts[1].trim())
+        ? Number(parts[1].trim()) : NaN;
 
       if (!isNaN(spo2Number) && spo2Number >= 70 && spo2Number <= 100) {
         this.latestSpO2 = spo2Number;
