@@ -630,7 +630,8 @@ class BleService {
     try {
       // Current backend schema has no SpO2/sensor-health column. Do not
       // mislabel those packets as heartbeat events.
-      if (event.type === 'SPO2' || event.type === 'SENSOR_STATUS' || event.type === 'VITALS_STATUS') {
+      if (event.type === 'RAW' || event.type === 'SPO2' ||
+          event.type === 'SENSOR_STATUS' || event.type === 'VITALS_STATUS') {
         return;
       }
 
