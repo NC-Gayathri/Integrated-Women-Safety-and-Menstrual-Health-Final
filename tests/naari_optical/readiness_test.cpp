@@ -155,6 +155,27 @@ int main(int argc, char** argv) {
       testClock = failedAt + 2000;
       if (motion) { updateMpuFallDetection(); require(mpuReady, "MPU reconnect must recover after backoff"); }
       else { updateOpticalSensor(); require(opticalReady, "optical reconnect must recover after backoff"); }
+    } else if (name == "mpu6050_single_axis_drop" ||
+               name == "mpu6500_single_axis_drop") {
+      const uint8_t identity = name == "mpu6050_single_axis_drop" ? 0x68 : 0x70;
+      Wire.enableMpu(identity);
+      require(initializeMpuAt(0x68), "MPU must initialize before a drop");
+      require((Wire.mpuRegs[0x1C] & 0x18) == 0x10,
+              "single-axis impacts require verified +/-8g accelerometer range");
+      delay(30000); // Outside the existing cooldown window.
+      auto accel = [](uint8_t x, uint8_t y, uint8_t z) {
+        Wire.mpuRegs[0x3B] = x; Wire.mpuRegs[0x3D] = y;
+        Wire.mpuRegs[0x3F] = z;
+        delay(21); updateMpuFallDetection();
+      };
+      // At +/-8g, 0x3000 is 3g on ONE axis. At the old +/-2g
+      // configuration, the same bytes are only 0.75g, so the old
+      // firmware cannot identify the impact.
+      for (int i = 0; i < 5; ++i) accel(0, 0, 0);
+      accel(0x30, 0, 0);
+      for (int i = 0; i < 34; ++i) accel(0, 0, 0x10);
+      require(Serial.output.find("[EVENT] FALL_DETECTED") != std::string::npos,
+              "a coherent single-axis drop must issue FALL_DETECTED");
     } else if (name == "mpu_handling_spike_rejected") {
       Wire.enableMpu(0x70);
       require(initializeMpuAt(0x68), "initial MPU must be ready");
