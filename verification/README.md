@@ -52,6 +52,8 @@ This is an induction proof for the **debounced press/counter abstraction**; it d
 
 **CE-02: Prefix-based emergency event.** The Android BLE parser previously accepted `SOS_EXTRA` or `SOS:FAKE` as the genuine SOS event because it used `startsWith('SOS')`. v12 requires an exact case-insensitive SOS packet, and likewise requires an exact STATUS:ONLINE packet. HEART_RATE and SPO2 now require the entire numeric suffix to be 1–3 ASCII digits rather than accepting `parseInt('72garbage') == 72`. Existing legit packets and malformed-packet regressions run against the real TypeScript parser.
 
+**CE-03: Unknown-packet cloud pollution.** Strict parsing originally routed malformed frames to the `RAW` type, but the backend sync fallback mislabeled RAW as `STATUS_HEARTBEAT`. The backend now skips ingestion of all RAW packets and the malformed-packet regression requires zero cloud ingestion. Neither a RAW packet nor an untrusted advertised device name can be treated as authenticated emergency evidence.
+
 **Other previously repaired defects** remain covered by CI host tests: first-boot fall suppression, blind intervals, sensor failure recovery, fake optical values and the false-success BLE monitor registration path.
 
 ## 3. Connection to the actual implementation
