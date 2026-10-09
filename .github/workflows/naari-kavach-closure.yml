@@ -84,7 +84,7 @@ jobs:
           grep -Fq '#define BLE_MTU             64' "$F"
           grep -Fq 'BLEDevice::setMTU(BLE_MTU)' "$F"
           grep -Fq 'sendSensorHealthSnapshot();' "$F"
-          grep -Fq '[FIRMWARE] single-axis-fall-v10-20261009' "$F"
+          grep -Fq '[FIRMWARE] verified-fall-timing-v11-20261009' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"
