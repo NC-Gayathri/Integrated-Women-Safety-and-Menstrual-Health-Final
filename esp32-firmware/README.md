@@ -22,7 +22,7 @@ This firmware keeps BLE and SOS available even when a sensor is unavailable, sup
 
 **Repeated `[I2C] Read failed` or sensor dropouts?** The [v5 I2C recovery repair](../documentation/NAARI_KAVACH_I2C_RECOVERY.md) stops the optical retry storm, immediately clears invalid readings, waits two seconds before verified recovery, and cancels motion sequences interrupted by a bus failure. The guide records the actual failed capture and the physical acceptance requirements.
 
-The regression suite exercises **51 sensor/SOS cases and 30 signal-acquisition cases**, plus the phone's validity/SOS parser. CI also compiles the real sketch for **DOIT ESP32 DEVKIT V1** with ESP32 Arduino core **3.3.12**. These software gates do not certify a physical USB cable, ROM-loader connection, flash operation, real sensor bus or measurement accuracy.
+The regression suite exercises **58 sensor/SOS/fall cases and 33 signal-acquisition cases**, plus the phone's validity/SOS parser. CI also compiles the real sketch for **DOIT ESP32 DEVKIT V1** with ESP32 Arduino core **3.3.12**. These software gates do not certify a physical USB cable, ROM-loader connection, flash operation, real sensor bus or measurement accuracy.
 
 **Both sensors READY but `VITALS:NO_VALID_READING`?** Follow the [vitals acquisition guide](../documentation/NAARI_KAVACH_VITALS_ACQUISITION.md). This version preserves pulse history between beats, uses sample timing for buffered data, clears stale values, and prints `[SIGNAL]` raw red/IR values and the acquisition reason once per reporting interval. Update the phone app as well so `VITALS:ACQUIRING` clears old displayed readings.
 
