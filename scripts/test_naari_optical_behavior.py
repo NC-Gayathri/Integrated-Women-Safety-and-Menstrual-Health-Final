@@ -29,6 +29,7 @@ CASES = [
     'optical_failed_init_backoff', 'mpu_failed_init_backoff',
     'mpu_runtime_backoff', 'bus_failure_sos', 'optical_failure_mpu_healthy',
     'mpu_fault_discards_fall', 'mpu_disconnect_discards_fall',
+    'mpu6050_single_axis_drop', 'mpu6500_single_axis_drop',
     'mpu_handling_spike_rejected', 'mpu_single_stationary_sample_rejected',
 ]
 with tempfile.TemporaryDirectory(prefix='naari-sensors-') as temporary:
