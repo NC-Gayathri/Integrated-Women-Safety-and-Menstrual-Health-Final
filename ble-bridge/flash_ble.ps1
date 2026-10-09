@@ -11,7 +11,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ExpectedMarker = '[FIRMWARE] single-axis-fall-v10-20261009'
+$ExpectedMarker = '[FIRMWARE] verified-fall-timing-v11-20261009'
 $Fqbn = 'esp32:esp32:esp32doit-devkit-v1'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $SketchDir = Join-Path $RepoRoot 'esp32-firmware\naari_kavach_dual_sensor_ble_test'

@@ -86,6 +86,7 @@ bool oldDeviceConnected = false;
 #define FALL_POST_IMPACT_TIMEOUT_MS 2000
 #define FALL_STATIONARY_MIN_MS 600
 #define MPU_SAMPLE_INTERVAL_MS 10
+#define MPU_SAMPLE_MAX_GAP_MS 150 // In-progress falls require continuous sampled evidence.
 #define OPTICAL_RETRY_INTERVAL_MS 2000
 #define OPTICAL_RESET_TIMEOUT_MS 150
 #define OPTICAL_RESET_POLL_MS 5
@@ -323,6 +324,7 @@ unsigned long freeFallStartedAt = 0;
 unsigned long impactStartedAt = 0;
 unsigned long stationaryStartedAt = 0;
 unsigned long lastFallTriggeredAt = 0;
+bool hasFallTriggered = false; // Boot is not a previous fall.
 
 bool initializeMpuAt(uint8_t addr) {
   // READY is fail-closed: every attempt must re-prove identity and configuration.
@@ -408,6 +410,7 @@ void updateMpuFallDetection() {
   }
 
   if (now - lastMpuSample < MPU_SAMPLE_INTERVAL_MS) return;
+  const unsigned long previousMpuSample = lastMpuSample;
   lastMpuSample = now;
 
   uint8_t raw[6];
@@ -429,6 +432,13 @@ void updateMpuFallDetection() {
 
   mpuConsecutiveErrors = 0;
 
+  // A blind interval cannot substantiate free-fall or continuous stillness.
+  if (fallState != FALL_IDLE && previousMpuSample != 0 &&
+      now - previousMpuSample > MPU_SAMPLE_MAX_GAP_MS) {
+    fallState = FALL_IDLE;
+    stationaryStartedAt = 0;
+  }
+
   int16_t axRaw = (int16_t)((raw[0] << 8) | raw[1]);
   int16_t ayRaw = (int16_t)((raw[2] << 8) | raw[3]);
   int16_t azRaw = (int16_t)((raw[4] << 8) | raw[5]);
@@ -438,7 +448,7 @@ void updateMpuFallDetection() {
   const float az = azRaw / MPU_ACCEL_LSB_PER_G;
   const float magnitude = sqrtf(ax * ax + ay * ay + az * az);
 
-  if (now - lastFallTriggeredAt < FALL_COOLDOWN_MS) {
+  if (hasFallTriggered && now - lastFallTriggeredAt < FALL_COOLDOWN_MS) {
     fallState = FALL_IDLE;
     stationaryStartedAt = 0;
     return;
@@ -482,6 +492,7 @@ void updateMpuFallDetection() {
         if (stationaryStartedAt == 0) stationaryStartedAt = now;
         if (now - stationaryStartedAt >= FALL_STATIONARY_MIN_MS) {
           lastFallTriggeredAt = now;
+          hasFallTriggered = true;
           sendBleEvent("FALL_DETECTED");
           pulseLed(500);
           fallState = FALL_IDLE;
@@ -1195,7 +1206,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
-  Serial.println("[FIRMWARE] single-axis-fall-v10-20261009");
+  Serial.println("[FIRMWARE] verified-fall-timing-v11-20261009");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);

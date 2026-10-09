@@ -100,7 +100,8 @@ Expected BLE/Serial messages eventually include:
 - `SPO2:<percent>`
 
 With no finger:
-- `VITALS:NO_VALID_READING` or `VITALS:ACQUIRING`
+- no repeated no-finger `LOW_LIGHT` or `VITALS:NO_VALID_READING` lines while idle (quiet mode)
+- exactly one `VITALS:NO_VALID_READING` transition when a previously detected finger is removed
 - no fabricated fixed/random BPM or SpO2 values
 
 SpO2 is a prototype estimate from real red/IR samples and is not a medical diagnosis.
@@ -125,7 +126,7 @@ PASS only if:
 ### Test B — optical sensor disconnected while running
 1. Boot with MAX3010x working.
 2. Confirm sensor READY.
-3. Disconnect MAX3010x.
+3. Using an electrically safe purpose-built isolation switch/test fixture, simulate optical I2C failure. Do **not** hot-unplug loose powered jumper wires.
 4. Trigger three-click SOS.
 
 PASS only if:
@@ -175,7 +176,7 @@ physical integration closed until all mandatory evidence below is captured:
 - Test A PASS
 - Test B PASS
 - Test C PASS
-- MPU6050 detection PASS
+- MPU6050 **or** MPU6500 identity and configuration detection PASS
 - exact-name BLE discovery PASS
 - exact service UUID discovery PASS
 - exact characteristic UUID subscription PASS
@@ -185,3 +186,7 @@ physical integration closed until all mandatory evidence below is captured:
 - no Wi-Fi/HTTP in test firmware
 
 Final closure status must be based on observed evidence, not on code inspection alone.
+
+## 11. Evidence ledger for v11
+
+The current firmware's boot marker is `[FIRMWARE] verified-fall-timing-v11-20261009`. A valid physical fall test must confirm it from the actual board. Refer to [the independent 9 October software and hardware audit](NAARI_KAVACH_FORMAL_AUDIT_2026-10-09.md) for the first-boot/cooldown and sampled-motion-continuity fixes, blocked physical measurements, and final acceptance standards.
