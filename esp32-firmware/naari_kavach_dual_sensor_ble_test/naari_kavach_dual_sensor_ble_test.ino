@@ -72,7 +72,8 @@ bool oldDeviceConnected = false;
 #define MPU6500_WHO_AM_I     0x70
 #define MPU_PWR_SLEEP_BIT    0x40
 #define MPU_ACCEL_FS_MASK    0x18
-#define MPU_ACCEL_FS_2G      0x00
+#define MPU_ACCEL_FS_8G      0x10
+#define MPU_ACCEL_LSB_PER_G  4096.0f
 
 // -----------------------------------------------------------------------------
 // Timing
@@ -80,11 +81,11 @@ bool oldDeviceConnected = false;
 #define BUTTON_TRIPLE_CLICK_WINDOW_MS 1800
 #define BUTTON_DEBOUNCE_MS 50
 #define FALL_COOLDOWN_MS 25000
-#define FALL_FREE_FALL_MIN_MS 80
+#define FALL_FREE_FALL_MIN_MS 60
 #define FALL_FREE_FALL_MAX_MS 600
 #define FALL_POST_IMPACT_TIMEOUT_MS 2000
 #define FALL_STATIONARY_MIN_MS 600
-#define MPU_SAMPLE_INTERVAL_MS 20
+#define MPU_SAMPLE_INTERVAL_MS 10
 #define OPTICAL_RETRY_INTERVAL_MS 2000
 #define OPTICAL_RESET_TIMEOUT_MS 150
 #define OPTICAL_RESET_POLL_MS 5
@@ -356,9 +357,9 @@ bool initializeMpuAt(uint8_t addr) {
     return false;
   }
 
-  // Fall detection converts raw acceleration using 16384 LSB/g, which is valid
-  // for the +/-2 g setting. Force that range and verify it before READY.
-  if (!writeRegister8(addr, MPU_REG_ACCEL_CONFIG, MPU_ACCEL_FS_2G)) {
+  // Fall detection requires a >2.5g impact even when it strikes just ONE axis.
+  // +/-2g clips such impacts; use +/-8g (4096 LSB/g) and verify readback.
+  if (!writeRegister8(addr, MPU_REG_ACCEL_CONFIG, MPU_ACCEL_FS_8G)) {
     Serial.printf("[MPU] %s accelerometer configuration write failed at 0x%02X.\n",
                   chipName, addr);
     return false;
@@ -366,7 +367,7 @@ bool initializeMpuAt(uint8_t addr) {
 
   uint8_t accelConfig = 0xFF;
   if (!readRegister8(addr, MPU_REG_ACCEL_CONFIG, accelConfig) ||
-      (accelConfig & MPU_ACCEL_FS_MASK) != MPU_ACCEL_FS_2G) {
+      (accelConfig & MPU_ACCEL_FS_MASK) != MPU_ACCEL_FS_8G) {
     Serial.printf("[MPU] %s accelerometer read-back failed at 0x%02X (ACCEL_CONFIG=0x%02X).\n",
                   chipName, addr, accelConfig);
     return false;
@@ -379,7 +380,7 @@ bool initializeMpuAt(uint8_t addr) {
   fallState = FALL_IDLE;
   stationaryStartedAt = 0;
 
-  Serial.printf("[MPU] %s ready at 0x%02X (WHO_AM_I=0x%02X, accel=+/-2g).\n",
+  Serial.printf("[MPU] %s ready at 0x%02X (WHO_AM_I=0x%02X, accel=+/-8g).\n",
                 chipName, addr, whoAmI);
   sendBleEvent(String("SENSOR:") + chipName + ":READY");
   return true;
@@ -432,9 +433,9 @@ void updateMpuFallDetection() {
   int16_t ayRaw = (int16_t)((raw[2] << 8) | raw[3]);
   int16_t azRaw = (int16_t)((raw[4] << 8) | raw[5]);
 
-  const float ax = axRaw / 16384.0f;
-  const float ay = ayRaw / 16384.0f;
-  const float az = azRaw / 16384.0f;
+  const float ax = axRaw / MPU_ACCEL_LSB_PER_G;
+  const float ay = ayRaw / MPU_ACCEL_LSB_PER_G;
+  const float az = azRaw / MPU_ACCEL_LSB_PER_G;
   const float magnitude = sqrtf(ax * ax + ay * ay + az * az);
 
   if (now - lastFallTriggeredAt < FALL_COOLDOWN_MS) {
@@ -1194,7 +1195,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
-  Serial.println("[FIRMWARE] quiet-events-v9-20261008");
+  Serial.println("[FIRMWARE] single-axis-fall-v10-20261009");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
