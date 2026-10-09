@@ -362,9 +362,11 @@ class BleService {
         this.emitDiagnostics();
         this.updateStatus('SUBSCRIBED TO SENSOR NOTIFICATIONS');
       } else {
-        const reason = this.diagnostics.serviceFound
-          ? 'Expected BLE notify characteristic UUID was not found/notifiable.'
-          : 'Expected BLE service UUID was not found.';
+        const reason = this.diagnostics.characteristicFound
+          ? 'Expected BLE characteristic found but native notification registration failed.'
+          : this.diagnostics.serviceFound
+            ? 'Expected BLE notify characteristic UUID was not found/notifiable.'
+            : 'Expected BLE service UUID was not found.';
         console.error(`[BLE] Contract mismatch: ${reason}`);
         this.updateStatus('ERROR', reason);
         try {
