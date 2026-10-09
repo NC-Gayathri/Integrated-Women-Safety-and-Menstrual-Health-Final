@@ -65,6 +65,25 @@ assert.equal(backendEvents.at(-1).fallDetected, true, 'backend fall flag must be
 for (const status of ['SENSOR:MAX30102:NOT_READY', 'SENSOR:MAX30100:I2C_ERROR']) {
   acquire(); receive(status); assertCleared();
 }
+// Strict protocol parsing must not translate malformed or prefixed values
+// into emergency events or fabricated numeric telemetry.
+const beforeMalformed = backendEvents.length;
+const beforeMalformedEvents = events.length;
+for (const malformed of [
+  'SOS_EXTRA', 'SOS:FAKE', 'STATUS:ONLINE_FAKE',
+  'HEART_RATE:72garbage', 'HEART_RATE:72:BAD', 'SPO2:96garbage',
+  'SPO2:96:BAD', 'HEART_RATE:+72', 'SPO2:-1',
+]) {
+  receive(malformed);
+}
+assert.equal(backendEvents.length, beforeMalformed,
+  'malformed packets must never become cloud emergency or numeric events');
+assert.equal(events.slice(beforeMalformedEvents).some(e =>
+  ['BUTTON_SOS', 'STATUS_ONLINE', 'HEARTBEAT', 'SPO2'].includes(e.type)), false,
+  'prefix packets must never be misclassified as trusted telemetry');
+receive('SOS');
+assert.equal(events.at(-1).type, 'BUTTON_SOS', 'valid exact SOS still dispatches');
+
 // Mock the actual connection registration boundary: monitor() can throw, or
 // return no subscription, even when a device and exact GATT UUIDs were found.
 // Neither outcome may be advertised to the user as subscribed/ready.
