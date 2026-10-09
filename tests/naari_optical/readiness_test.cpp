@@ -155,6 +155,27 @@ int main(int argc, char** argv) {
       testClock = failedAt + 2000;
       if (motion) { updateMpuFallDetection(); require(mpuReady, "MPU reconnect must recover after backoff"); }
       else { updateOpticalSensor(); require(opticalReady, "optical reconnect must recover after backoff"); }
+    } else if (name == "mpu6050_single_axis_drop" ||
+               name == "mpu6500_single_axis_drop") {
+      const uint8_t identity = name == "mpu6050_single_axis_drop" ? 0x68 : 0x70;
+      Wire.enableMpu(identity);
+      require(initializeMpuAt(0x68), "MPU must initialize before a drop");
+      require((Wire.mpuRegs[0x1C] & 0x18) == 0x10,
+              "single-axis impacts require verified +/-8g accelerometer range");
+      delay(30000); // Outside the existing cooldown window.
+      auto accel = [](uint8_t x, uint8_t y, uint8_t z) {
+        Wire.mpuRegs[0x3B] = x; Wire.mpuRegs[0x3D] = y;
+        Wire.mpuRegs[0x3F] = z;
+        delay(21); updateMpuFallDetection();
+      };
+      // At +/-8g, 0x3000 is 3g on ONE axis. At the old +/-2g
+      // configuration, the same bytes are only 0.75g, so the old
+      // firmware cannot identify the impact.
+      for (int i = 0; i < 5; ++i) accel(0, 0, 0);
+      accel(0x30, 0, 0);
+      for (int i = 0; i < 34; ++i) accel(0, 0, 0x10);
+      require(Serial.output.find("[EVENT] FALL_DETECTED") != std::string::npos,
+              "a coherent single-axis drop must issue FALL_DETECTED");
     } else if (name == "mpu_handling_spike_rejected") {
       Wire.enableMpu(0x70);
       require(initializeMpuAt(0x68), "initial MPU must be ready");
@@ -168,7 +189,7 @@ int main(int argc, char** argv) {
       acceleration(0, 0, 0);
       acceleration(0x60, 0x60, 0x60);
       Wire.mpuRegs[0x3B] = Wire.mpuRegs[0x3D] = 0;
-      Wire.mpuRegs[0x3F] = 0x40;
+      Wire.mpuRegs[0x3F] = 0x10;
       delay(1001); updateMpuFallDetection();
       require(Serial.output.find("FALL_DETECTED") == std::string::npos,
               "short handling dip plus spike must not become a fall");
@@ -185,7 +206,7 @@ int main(int argc, char** argv) {
       for (int i = 0; i < 5; ++i) acceleration(0, 0, 0);
       acceleration(0x60, 0x60, 0x60);
       delay(1001);
-      acceleration(0, 0, 0x40);
+      acceleration(0, 0, 0x10);
       require(Serial.output.find("FALL_DETECTED") == std::string::npos,
               "one post-impact stationary sample must not become a fall");
     } else if (name == "mpu_fault_discards_fall" || name == "mpu_disconnect_discards_fall") {
@@ -205,16 +226,16 @@ int main(int argc, char** argv) {
       }
       Wire.failReadReg = -1;
       Wire.mpuRegs[0x3B] = Wire.mpuRegs[0x3D] = 0;
-      Wire.mpuRegs[0x3F] = 0x40;
+      Wire.mpuRegs[0x3F] = 0x10;
       Serial.output.clear();
       delay(2100); updateMpuFallDetection();
-      acceleration(0, 0, 0x40);
+      acceleration(0, 0, 0x10);
       require(Serial.output.find("FALL_DETECTED") == std::string::npos,
               "recovery must not finish an old fall sequence across missing motion samples");
       // A new complete sustained sequence after recovery must still alert.
       for (int i = 0; i < 5; ++i) acceleration(0, 0, 0);
       acceleration(0x60, 0x60, 0x60);
-      for (int i = 0; i < 32; ++i) acceleration(0, 0, 0x40);
+      for (int i = 0; i < 32; ++i) acceleration(0, 0, 0x10);
       require(Serial.output.find("FALL_DETECTED") != std::string::npos,
               "a fresh sustained fall sequence must remain detectable after recovery");
     } else if (name == "mpu_runtime_backoff") {
@@ -264,7 +285,7 @@ int main(int argc, char** argv) {
       require(initializeMpuAt(0x68), "MPU6050 must remain supported");
       require(mpuReady, "MPU6050 must become READY");
       require((Wire.mpuRegs[0x6B] & 0x40) == 0, "READY requires the SLEEP bit to be cleared");
-      require((Wire.mpuRegs[0x1C] & 0x18) == 0, "READY requires the +/-2 g accelerometer range");
+      require((Wire.mpuRegs[0x1C] & 0x18) == 0x10, "READY requires the +/-8 g accelerometer range");
       require(Serial.output.find("SENSOR:MPU6050:READY") != std::string::npos,
               "MPU6050 READY must preserve its existing identity event");
     } else if (name == "mpu6500_ready") {
@@ -272,7 +293,7 @@ int main(int argc, char** argv) {
       require(initializeMpuAt(0x68), "WHO_AM_I 0x70 must initialize as MPU6500");
       require(mpuReady, "MPU6500 must become READY");
       require((Wire.mpuRegs[0x6B] & 0x40) == 0, "READY requires the SLEEP bit to be cleared");
-      require((Wire.mpuRegs[0x1C] & 0x18) == 0, "READY requires the +/-2 g accelerometer range");
+      require((Wire.mpuRegs[0x1C] & 0x18) == 0x10, "READY requires the +/-8 g accelerometer range");
       require(Serial.output.find("SENSOR:MPU6500:READY") != std::string::npos,
               "READY must report the actual MPU6500 identity");
     } else if (name == "mpu6500_high_address") {

@@ -18,7 +18,7 @@ That failure happens **before the new application firmware can run**. It does no
 The current acceptance marker is:
 
 ```text
-[FIRMWARE] quiet-events-v9-20261008
+[FIRMWARE] single-axis-fall-v10-20261009
 ```
 
 Any older firmware marker is stale and must not be used as physical acceptance evidence.
@@ -118,7 +118,7 @@ Again, substitute the actual verified port. The historical filename is retained 
 Physical boot acceptance requires:
 
 ```text
-[FIRMWARE] quiet-events-v9-20261008
+[FIRMWARE] single-axis-fall-v10-20261009
 ```
 
 For the reported motion device, MPU acceptance then requires the current firmware to identify and configure the part, for example:

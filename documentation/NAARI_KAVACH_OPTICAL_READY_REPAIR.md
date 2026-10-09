@@ -9,7 +9,7 @@ The repository default branch is **master**. The authoritative integration sketc
 The required boot marker is:
 
 ```text
-[FIRMWARE] quiet-events-v9-20261008
+[FIRMWARE] single-axis-fall-v10-20261009
 ```
 
 Software/CI closure and physical-board closure are separate evidence gates. The repository now has bounded software evidence for MPU6050/MPU6500 compatibility, optical initialization/error recovery, BLE/SOS continuity and cleanup safety. A successful CI run does **not** prove that a particular MAX3010x module, USB cable or flashed ESP32 works physically.
@@ -80,7 +80,7 @@ Replace the example port with the port proven by unplug/replug in Windows Device
 The helper must observe:
 
 ```text
-[FIRMWARE] quiet-events-v9-20261008
+[FIRMWARE] single-axis-fall-v10-20261009
 ```
 
 If that exact line is absent, do not use the subsequent sensor output as evidence for the current repair.
@@ -128,10 +128,25 @@ Physical closure requires all evidence relevant to the claim being closed:
 
 | Claim | Minimum physical evidence |
 |---|---|
-| Correct firmware installed | current `quiet-events-v9-20261008` boot marker |
+| Correct firmware installed | current `single-axis-fall-v10-20261009` boot marker |
 | MPU6500 fixed | real `WHO_AM_I=0x70` device reaches chip-specific READY after verified ±2 g configuration |
 | Optical sensor fixed | real MAX30100/MAX30102 identification + chip-specific READY |
 | Vitals acquisition works | current marker, real `[SIGNAL]` capture, changing valid HR/SpO2 with stable contact, and stale values cleared when contact is removed |
 | SOS works | real three-click GPIO4 action produces SOS event |
 
 Repository merge status, CI success or branch deletion cannot substitute for these observations.
+
+## v10 fall-path verification — 9 October 2026
+
+The 9 October hardware capture identifies the motion chip as **MPU6500**
+(WHO_AM_I 0x70), even if the breakout was described informally as an MPU6050.
+Both supported chip identities use a verified +/-8g accelerometer setting,
+4096 counts per g, and 10ms scheduled motion sampling to make a single-axis
+impact measurable. Hosted regressions model each identity separately.
+The fall alert still requires sustained free fall, sampled impact, and
+post-impact stillness, not ordinary handling or a button press.
+A physical drop is **not guaranteed** to alert: brief impacts can be missed,
+I2C loss invalidates the candidate, and brownouts reset the controller.
+Run tests on a padded captive fixture with strain-relieved connections,
+not by dropping an exposed wired sensor/ESP32. The observed brownout and
+shared-bus I2C errors remain separate unresolved hardware failures.

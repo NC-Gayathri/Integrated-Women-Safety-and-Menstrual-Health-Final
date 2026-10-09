@@ -21,7 +21,7 @@ The authoritative sketch remains
 on `master`. The current boot marker, including the v5 recovery and v6 settling repairs, is:
 
 ```text
-[FIRMWARE] quiet-events-v9-20261008
+[FIRMWARE] single-axis-fall-v10-20261009
 ```
 
 Runtime reporting is intentionally quiet while the optical sensor is uncovered. The

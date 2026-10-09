@@ -54,7 +54,15 @@ assert.equal(service.latestSpO2, null, 'partial acquisition must not reuse old S
 receive('VITALS:ACQUIRING'); receive('SOS');
 assert.equal(events.at(-1).type, 'BUTTON_SOS', 'SOS must still dispatch while acquiring');
 assert.equal(backendEvents.at(-1).heartRate, undefined, 'SOS must not attach stale BPM');
+// The real firmware emits exactly FALL_DETECTED. The app must turn that
+// packet into a visible safety-screen event and a tagged backend event.
+receive('FALL_DETECTED');
+assert.equal(events.at(-1).type, 'FALL_DETECTED', 'fall notification must reach app listeners');
+assert.equal(events.at(-1).fallDetected, true, 'fall notification must carry a true fall flag');
+assert.equal(service.lastFallDetected, true, 'app fall state must be updated');
+assert.equal(backendEvents.at(-1).eventType, 'FALL_DETECTED', 'backend event type must be fall');
+assert.equal(backendEvents.at(-1).fallDetected, true, 'backend fall flag must be true');
 for (const status of ['SENSOR:MAX30102:NOT_READY', 'SENSOR:MAX30100:I2C_ERROR']) {
   acquire(); receive(status); assertCleared();
 }
-console.log('BLE vitals validity and SOS behavior PASS');
+console.log('BLE vitals, SOS, and fall event behavior PASS');

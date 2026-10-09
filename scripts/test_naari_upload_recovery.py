@@ -26,7 +26,7 @@ firmware = FIRMWARE.read_text(encoding='utf-8')
 match = re.search(r'Serial\.println\("\[FIRMWARE\] ([^"]+)"\);', firmware)
 assert match, 'firmware must expose a serial build marker'
 marker = match.group(1)
-assert marker == 'quiet-events-v9-20261008', f'unexpected current marker: {marker}'
+assert marker == 'single-axis-fall-v10-20261009', f'unexpected current marker: {marker}'
 expected_line = f'[FIRMWARE] {marker}'
 
 for path in [README, RECOVERY, OPTICAL]:

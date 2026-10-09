@@ -11,7 +11,7 @@ from the repository's current default branch, `master`.
 The current Serial boot marker is:
 
 ```text
-[FIRMWARE] quiet-events-v9-20261008
+[FIRMWARE] single-axis-fall-v10-20261009
 ```
 
 Idle optical reporting is event-driven in v9: with no finger present the firmware keeps sampling for health/recovery but does not print periodic LOW_LIGHT/NO_VALID_READING lines. Finger placement/removal, numeric vitals, SOS/fall, BLE transitions, and genuine sensor faults remain visible.
@@ -40,7 +40,7 @@ The repository also contains older or purpose-specific firmware variants. They a
 - **`esp32_firmware/esp32_firmware.ino`** — legacy BLE GATT firmware.
 - diagnostic/scanner sketches — intentionally narrow hardware-diagnostic programs.
 
-Do not flash a legacy binary when validating `quiet-events-v9-20261008`.
+Do not flash a legacy binary when validating `single-axis-fall-v10-20261009`.
 
 ---
 
@@ -55,3 +55,15 @@ The following wiring applies to the separate Wi-Fi SOS firmware, not to the dual
 | Built-in Status LED | Internal | GPIO 2 | Status indication |
 
 To use the Wi-Fi variant, configure its Wi-Fi/backend/device credentials in that sketch, choose the correct ESP32 board and actual COM port, upload it, and inspect its own Serial output. Its runtime/network behaviour is outside the current dual-sensor BLE acceptance gate.
+
+## Single-axis fall detection (v10)
+
+Both WHO_AM_I=0x68 (MPU6050) and WHO_AM_I=0x70 (MPU6500) are
+verified at +/-8g, 4096 LSB/g. Sampling is requested every 10ms.
+A fall alert needs sustained <0.5g free fall (60-600ms), a sampled
+>2.5g impact, then 600ms of continuous near-1g stillness within 2s.
+These are prototype heuristics, not a clinical fall detector. A brief
+impact may be missed between samples; disconnected MPU/I2C or ESP32
+brownout cannot generate reliable fall evidence. Run drop demonstrations
+with the **device secured in a padded fixture**, not a loose wired
+sensor PCB. Never physically drop an ESP32 connected to USB or a phone.
