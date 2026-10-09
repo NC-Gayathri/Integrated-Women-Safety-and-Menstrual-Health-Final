@@ -262,7 +262,8 @@ jobs:
               pr.merge_commit_sha === context.sha &&
               pr.base.ref === defaultBranch &&
               pr.head.repo?.full_name === `${owner}/${repo}` &&
-              pr.head.ref.startsWith('fix/naari-kavach-')
+              (pr.head.ref.startsWith('fix/naari-kavach-') ||
+               pr.head.ref === 'fix/naari-formal-assurance-v12')
             );
 
             if (candidates.length === 0) {
