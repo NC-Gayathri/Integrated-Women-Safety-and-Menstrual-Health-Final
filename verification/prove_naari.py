@@ -36,9 +36,10 @@ def check_source_guard():
         r"text\.toUpperCase\(\)\s*===\s*'STATUS:ONLINE'",
         r"targetSubscribed = this\.subscribeToCharacteristic\(char\)",
         r"!subscription \|\| typeof subscription\.remove !== 'function'",
+        r"event\.type\s*===\s*'RAW'",
     ]:
         assert re.search(pattern, ble), "BLE source drift: " + pattern
-    print("Source guard checks: 16/16 PASS")
+    print("Source guard checks: 17/17 PASS")
 
 # 0=IDLE, 1=FREE_FALL, 2=IMPACT. Stage 3 is excluded.
 # ready/read_ok are environment values; never assumed to be true.
