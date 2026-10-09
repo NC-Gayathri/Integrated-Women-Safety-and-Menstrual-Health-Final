@@ -347,8 +347,8 @@ class BleService {
             console.log(`[BLE] Exact notify characteristic found: ${this.targetCharUUID}`);
             this.diagnostics.characteristicFound = true;
             this.emitDiagnostics();
-            this.subscribeToCharacteristic(char);
-            targetSubscribed = true;
+            // A thrown/invalid native registration must not be reported as subscribed.
+            targetSubscribed = this.subscribeToCharacteristic(char);
             break;
           }
         }
@@ -385,7 +385,7 @@ class BleService {
   // ---------------------------------------------------------------------------------------
   // 3. CONTINUOUS GATT NOTIFICATION MONITORING & DECODING
   // ---------------------------------------------------------------------------------------
-  private subscribeToCharacteristic(characteristic: any): void {
+  private subscribeToCharacteristic(characteristic: any): boolean {
     try {
       if (this.charSubscription) {
         this.charSubscription.remove();
@@ -393,7 +393,7 @@ class BleService {
       }
 
       // Continuous subscription - remains active indefinitely for all streaming packets
-      this.charSubscription = characteristic.monitor((error: any, char: any) => {
+      const subscription = characteristic.monitor((error: any, char: any) => {
         if (error) {
           console.warn('[BLE] Characteristic monitor error:', error);
           return;
@@ -407,8 +407,15 @@ class BleService {
           this.handleIncomingMessage(decodedText);
         }
       });
+      if (!subscription || typeof subscription.remove !== 'function') {
+        throw new Error('Native BLE notification monitor did not register');
+      }
+      this.charSubscription = subscription;
+      return true;
     } catch (e) {
       console.error(`[BLE] Failed to register monitor for ${characteristic?.uuid}:`, e);
+      this.charSubscription = null;
+      return false;
     }
   }
 
