@@ -176,6 +176,57 @@ int main(int argc, char** argv) {
       for (int i = 0; i < 34; ++i) accel(0, 0, 0x10);
       require(Serial.output.find("[EVENT] FALL_DETECTED") != std::string::npos,
               "a coherent single-axis drop must issue FALL_DETECTED");
+    } else if (name == "mpu_first_fall_after_boot") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68), "MPU must initialize");
+      auto sample = [](uint8_t x, uint8_t y, uint8_t z) {
+        Wire.mpuRegs[0x3B] = x; Wire.mpuRegs[0x3D] = y; Wire.mpuRegs[0x3F] = z;
+        delay(21); updateMpuFallDetection();
+      };
+      for (int i = 0; i < 5; ++i) sample(0, 0, 0);
+      sample(0x30, 0, 0);
+      for (int i = 0; i < 34; ++i) sample(0, 0, 0x10);
+      require(millis() < FALL_COOLDOWN_MS, "fixture must run in former boot lockout");
+      require(Serial.output.find("[EVENT] FALL_DETECTED") != std::string::npos,
+              "first real fall must not be blocked during initial 25 seconds");
+    } else if (name == "mpu_postimpact_gap_rejected") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68), "MPU must initialize");
+      delay(30000); // Isolate the blind-interval regression from boot cooldown.
+      auto sample = [](uint8_t x, uint8_t y, uint8_t z) {
+        Wire.mpuRegs[0x3B] = x; Wire.mpuRegs[0x3D] = y; Wire.mpuRegs[0x3F] = z;
+        delay(21); updateMpuFallDetection();
+      };
+      for (int i = 0; i < 5; ++i) sample(0, 0, 0);
+      sample(0x30, 0, 0); // One-axis impact.
+      sample(0, 0, 0x10); // First near-1g reading.
+      delay(700);          // No accelerometer evidence for this long gap.
+      sample(0, 0, 0x10);
+      require(Serial.output.find("[EVENT] FALL_DETECTED") == std::string::npos,
+              "one missing 700ms interval must not count as continuous stillness");
+    } else if (name == "mpu_first_fall_cooldown") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68), "MPU must initialize");
+      auto sample = [](uint8_t x, uint8_t y, uint8_t z) {
+        Wire.mpuRegs[0x3B] = x; Wire.mpuRegs[0x3D] = y; Wire.mpuRegs[0x3F] = z;
+        delay(21); updateMpuFallDetection();
+      };
+      auto fall = [&]() {
+        for (int i = 0; i < 5; ++i) sample(0, 0, 0);
+        sample(0x30, 0, 0);
+        for (int i = 0; i < 34; ++i) sample(0, 0, 0x10);
+      };
+      fall();
+      require(Serial.output.find("[EVENT] FALL_DETECTED") != std::string::npos,
+              "first fall must alert");
+      Serial.output.clear();
+      fall();
+      require(Serial.output.find("[EVENT] FALL_DETECTED") == std::string::npos,
+              "25s cooldown must suppress a second immediate fall");
+      delay(FALL_COOLDOWN_MS + 1);
+      fall();
+      require(Serial.output.find("[EVENT] FALL_DETECTED") != std::string::npos,
+              "fall detector must rearm after cooldown");
     } else if (name == "mpu_handling_spike_rejected") {
       Wire.enableMpu(0x70);
       require(initializeMpuAt(0x68), "initial MPU must be ready");
