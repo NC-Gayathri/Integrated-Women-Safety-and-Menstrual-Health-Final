@@ -338,6 +338,14 @@ unsigned long stationaryStartedAt = 0;
 unsigned long lastFallTriggeredAt = 0;
 bool hasFallTriggered = false; // Boot is not a previous fall.
 
+// Correlate *separate sensor fault transitions*, never ordinary retries.
+// A controller restart is an attempted software recovery, not a claim that
+// the common power rail or wiring is healthy.
+bool opticalFaultObserved = false, mpuFaultObserved = false;
+unsigned long opticalFaultAt = 0, mpuFaultAt = 0;
+bool sharedI2cRestartAttempted = false;
+unsigned long lastSharedI2cRestartAt = 0;
+
 bool initializeMpuAt(uint8_t addr) {
   // READY is fail-closed: every attempt must re-prove identity and configuration.
   mpuReady = false;
@@ -573,14 +581,6 @@ uint32_t lastIrRaw = 0;
 unsigned long opticalSampleTimeMs = 0;
 unsigned long opticalSampleCount = 0;
 uint16_t opticalSettlingSamples = 0;
-
-// Correlate *separate sensor fault transitions*, never ordinary retries.
-// A controller restart is an attempted software recovery, not a claim that
-// the common power rail or wiring is healthy.
-bool opticalFaultObserved = false, mpuFaultObserved = false;
-unsigned long opticalFaultAt = 0, mpuFaultAt = 0;
-bool sharedI2cRestartAttempted = false;
-unsigned long lastSharedI2cRestartAt = 0;
 
 const char* opticalChipName() {
   switch (opticalChip) {
