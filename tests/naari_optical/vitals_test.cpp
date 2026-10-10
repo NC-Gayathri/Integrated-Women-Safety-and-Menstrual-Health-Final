@@ -43,7 +43,7 @@ void noNumbers() {
           "invalid input must not publish numeric vitals");
 }
 
-void levelPulse(uint32_t redDcLevel, uint32_t irDcLevel, int frames = 600) {
+void levelPulse(uint32_t redDcLevel, uint32_t irDcLevel, int frames = 1000) {
   for (int i = 0; i < frames; ++i) {
     delay(10);
     const double wave = sin(2.0 * 3.141592653589793 * i / 100);
