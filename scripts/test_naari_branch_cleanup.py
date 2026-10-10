@@ -52,6 +52,22 @@ with tempfile.TemporaryDirectory(prefix='naari-cleanup-') as temp:
     assert not git(remote, 'for-each-ref', '--format=%(refname)', v12_ref)
     print('PASS cleanup deletes exact v12 formal-assurance branch')
 
+    # Only this exact mathematical-render repair head is eligible, not any prefix lookalike.
+    math_branch = 'fix/naari-github-math-render-v15'
+    math_ref = f'refs/heads/{math_branch}'
+    git(work, 'push', 'origin', f'HEAD:{math_ref}')
+    env['REPAIR_BRANCH'] = math_branch
+    env['REPAIR_HEAD'] = newer
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode == 0, attempt.stderr
+    assert not git(remote, 'for-each-ref', '--format=%(refname)', math_ref)
+    print('PASS cleanup permits exact mathematical-render PR branch')
+
+    env['REPAIR_BRANCH'] = 'fix/naari-github-math-render-v15-extra'
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode != 0, 'lookalike mathematical-render branch must not be allowlisted'
+    print('PASS cleanup rejects mathematical-render lookalike branch')
+
     env['REPAIR_BRANCH'] = 'fix/naari-formal-assurance-v12-extra'
     attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
     assert attempt.returncode != 0, 'lookalike v12 branch must not be allowlisted'
