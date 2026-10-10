@@ -22,7 +22,10 @@ inline unsigned long millis() { return testClock; }
 inline void delay(unsigned long ms) { testClock += ms; }
 inline void pinMode(int, int) {}
 inline void digitalWrite(int, int) {}
-inline int digitalRead(int) {
+inline int fakeI2cSdaLevel = HIGH, fakeI2cSclLevel = HIGH;
+inline int digitalRead(int pin) {
+  if (pin == 21) return fakeI2cSdaLevel;
+  if (pin == 22) return fakeI2cSclLevel;
   int value = HIGH;
   for (const auto& edge : buttonEdges) if (testClock >= edge.first) value = edge.second;
   return value;
