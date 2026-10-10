@@ -18,6 +18,7 @@ required = {
     "README.md", "EXACT_THEOREMS.md", "SOS_COUNTER_INDUCTION.md",
     "PROOF_SCOPE_AND_REPRODUCTION.md", "prove_naari.py",
     "prove_i2c_recovery.py", "requirements.txt", "check_proof_documentation.py",
+    "validate_repository_math.py", "check_mathjax_render.cjs",
 }
 assert required <= {p.name for p in DIR.iterdir()}, "Missing proof artifact"
 
@@ -80,6 +81,10 @@ assert f'"{FOLDER}/**"' in workflow, "Folder edits must trigger PR workflow"
 for runner in ("prove_naari.py", "prove_i2c_recovery.py", "check_proof_documentation.py"):
     assert f"{FOLDER}/{runner}" in workflow, f"CI does not execute {runner}"
 assert f"{FOLDER}/requirements.txt" in workflow, "CI dependency path not updated"
+assert f"{FOLDER}/validate_repository_math.py" in workflow
+assert f"{FOLDER}/check_mathjax_render.cjs" in workflow
+assert "mathjax-full@3.2.2" in workflow, "MathJax version not pinned"
+
 
 for active in ("README.md", "esp32-firmware/README.md",
                "documentation/NAARI_KAVACH_SHARED_BUS_DIAGNOSIS_V13.md",

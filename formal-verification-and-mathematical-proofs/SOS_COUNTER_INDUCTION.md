@@ -7,13 +7,13 @@
 ```math
 \begin{aligned}
 c&\in\mathcal{C}:=\{0,1,2\},\\
-p&\in\{0,1\} && \text{a debounced button press was accepted},\\
-w&\in\{0,1\} && \text{the 1.8 s click window remains open},\\
-c_0&=0 && \text{initial click count}.
+p&\in\{0,1\},\\
+w&\in\{0,1\},\\
+c_0&=0.
 \end{aligned}
 ```
 
-We model only the counter update on an atomic iteration. It is assumed that `p` already denotes a properly debounced press and `w` is already computed using the firmware's time window. The Python proof does **not** execute the physical switch, timer ISR, Android phone, or GATT stack.
+Here $p$ is an accepted, debounced button press, $w$ indicates that the 1.8-second window is open, and $c_0$ is the initial counter. We model only the counter update on an atomic iteration. The values of $p$ and $w$ are inputs to the model. The Python proof does **not** execute the physical switch, timer ISR, Android phone, or GATT stack.
 
 ## 2. Total transition relation
 
@@ -29,7 +29,7 @@ The actual abstract update logic checked by the Python source is:
 \end{cases}
 ```
 
-Here `a=1` means the *abstract counter* emitted SOS in that update.
+Here $a=1$ means the *abstract counter* emitted SOS in that update.
 
 ## 3. Complete case analysis (3 × 2 × 2 = 12)
 
@@ -58,9 +58,9 @@ Claim:
 \forall n\ge0,\quad c_n\in\mathcal{C}.
 ```
 
-**Base:** `c_0=0\in\mathcal{C}`.
+**Base:** $c_0=0\in\mathcal{C}$.
 
-**Inductive step:** assume `c_n\in\mathcal{C}`. Every one of the 12 table rows has its next value `c_{n+1}\in\mathcal{C}`. Therefore by mathematical induction, the counter never leaves `\{0,1,2\}` **under this transition definition**.
+**Inductive step:** assume $c_n\in\mathcal{C}$. Every one of the 12 table rows has its next value $c_{n+1}\in\mathcal{C}$. Therefore by mathematical induction, the counter never leaves $\{0,1,2\}$ **under this transition definition**.
 
 ## 5. Theorem SOS-S2 — emission gating
 
@@ -71,7 +71,7 @@ Claim:
 \bigl(c_n=2\bigr)\land\bigl(p_n=1\bigr)\land\bigl(w_n=1\bigr).
 ```
 
-**Proof:** in the complete table, exactly one row has `a=1`, and it requires `(c,p,w)=(2,1,1)`. No other abstract state/input combination emits.
+**Proof:** in the complete table, exactly one row has $a=1$, and it requires $(c,p,w)=(2,1,1)$. No other abstract state/input combination emits.
 
 ## 6. A concrete trace (not a real-device proof)
 

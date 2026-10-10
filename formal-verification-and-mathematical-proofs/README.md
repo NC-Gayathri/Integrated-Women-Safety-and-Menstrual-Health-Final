@@ -6,6 +6,8 @@ This is the authoritative, GitHub-rendered proof dossier for NAARI KAVACH. **All
 
 For the separate abstract counter induction see [SOS-S1 and SOS-S2](SOS_COUNTER_INDUCTION.md). [Methodology, proof obligations, toolchain and limits](PROOF_SCOPE_AND_REPRODUCTION.md) explains precisely what GitHub/Z3 proved and what remains a physical hardware acceptance task.
 
+**The rendered equations are now checked repository-wide in CI:** a strict macro/delimiter audit plus a pinned MathJax 3.2.2 parser that rejects malformed mathematics. This validates mathematical *rendering syntax*, not the truth of full-system properties.
+
 **Run the exact checks** from the repository root:
 
 ```sh
@@ -13,6 +15,7 @@ python -m pip install -r formal-verification-and-mathematical-proofs/requirement
 python "formal-verification-and-mathematical-proofs/prove_naari.py"
 python "formal-verification-and-mathematical-proofs/prove_i2c_recovery.py"
 python "formal-verification-and-mathematical-proofs/check_proof_documentation.py"
+python "formal-verification-and-mathematical-proofs/validate_repository_math.py"
 ```
 
 ---

@@ -4,7 +4,7 @@
 
 ## 1. What GitHub displays as mathematics
 
-GitHub Markdown supports its native LaTeX/MathJax syntax through ```math` fenced blocks and inline dollar math. No raster screenshot or external equation-image service is needed; the equations in [EXACT_THEOREMS.md](EXACT_THEOREMS.md) render directly on GitHub.
+GitHub Markdown supports its native LaTeX/MathJax syntax through fenced blocks labeled `math` and inline dollar math. No raster screenshot or external equation-image service is needed; the equations in [EXACT_THEOREMS.md](EXACT_THEOREMS.md) render directly on GitHub.
 
 Reference: [GitHub Docs — Writing mathematical expressions](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/writing-mathematical-expressions).
 
@@ -31,19 +31,19 @@ Z3 is used with quantifier-free bit-vector logic (`QF_BV`). For a modeled guard 
 \Phi := G\land\mathrm{Bad}.
 ```
 
-If Z3 returns **UNSAT**, then no assignment in the declared logic satisfies `\Phi`, and consequently `G\Rightarrow\neg\mathrm{Bad}` holds in that model.
+If Z3 returns **UNSAT**, then no assignment in the declared logic satisfies $\Phi$, and consequently $G\Rightarrow\neg\mathrm{Bad}$ holds in that model.
 
 A **SAT** query is an existential witness:
 
 ```math
-\operatorname{SAT}(\Phi)
+\mathrm{SAT}(\Phi)
 \Longleftrightarrow
 \exists\,\mathbf{x}:\Phi(\mathbf{x}).
 ```
 
 A SAT result **does not mean a universal safety theorem passed**. It is a useful non-vacuity or boundary-value check: the modeled guard is not always false. The runner expects the exact outcome shown alongside each theorem ID.
 
-All timestamp subtraction is performed modulo `2^{32}` and compared unsigned. This is valid for the specific small intervals used by the model. It is **not** a temporal guarantee across arbitrarily long outages, timer resets, power loss, or multiple complete counter wraps.
+All timestamp subtraction is performed modulo $2^{32}$ and compared unsigned. This is valid for the specific small intervals used by the model. It is **not** a temporal guarantee across arbitrarily long outages, timer resets, power loss, or multiple complete counter wraps.
 
 ## 4. Critical mathematical qualification of R09 and R10
 
@@ -51,12 +51,20 @@ Both are **consequences of deliberately written post-state definitions**, rather
 
 ```math
 \begin{aligned}
-R_O'&:= \operatorname{ite}(J,\mathrm{false},R_O),\\
-V_H'&:= \operatorname{ite}(J,\mathrm{false},V_H).
+R_O' &:=
+\begin{cases}
+\mathrm{false},& J,\\
+R_O,& \neg J,
+\end{cases}\\[6pt]
+V_H' &:=
+\begin{cases}
+\mathrm{false},& J,\\
+V_H,& \neg J.
+\end{cases}
 \end{aligned}
 ```
 
-Thus `J\land R_O'` and `J\land V_H'` are unsatisfiable **by substitution into the model**. They do not verify that the actual C++ implementation physically resets sensor state, or that any I²C restart succeeds. The real sketch's regression tests separately exercise the relevant failure paths. This distinction must not disappear from an external report.
+Thus $J\land R_O'$ and $J\land V_H'$ are unsatisfiable **by substitution into the model**. They do not verify that the actual C++ implementation physically resets sensor state, or that any I²C restart succeeds. The real sketch's regression tests separately exercise the relevant failure paths. This distinction must not disappear from an external report.
 
 Likewise P01–P06 and R01–R06 are implications following from the *explicitly defined guard formulas*—valuable bounded checks for contradictions and drift, but not the same as source-level proof.
 
@@ -81,10 +89,12 @@ Expected proof summary: `12/12` fall SMT, SOS 12-transition invariant PASS, `12/
 
 ## 6. Formal assumptions and unproven obligations
 
-**Model inputs and transition assumptions:** single decision step, Boolean sensor readiness and I²C error flags provided as symbolic/environment values, integer `millis()` modulo `2^{32}`, sensor measurement classification as a given Boolean, no modeling of microcontroller scheduler interleavings, I²C clock stretch, Wire internals, or probabilistic sensor noise. SOS abstraction assumes an already debounced atomic press and precomputed time-window status.
+**Model inputs and transition assumptions:** single decision step, Boolean sensor readiness and I²C error flags provided as symbolic/environment values, integer `millis()` modulo $2^{32}$, sensor measurement classification as a given Boolean, no modeling of microcontroller scheduler interleavings, I²C clock stretch, Wire internals, or probabilistic sensor noise. SOS abstraction assumes an already debounced atomic press and precomputed time-window status.
 
 **Outstanding source-level obligations:** build an automated translation or verified refinement relation from production firmware state to SMT variables, include all reachable predecessor states and interrupts, establish implementation invariants inductively, test concurrent BLE/sensor scheduling and command authenticity, and demonstrate end-to-end alert receipt/delivery. None of these is implied by `UNSAT` alone.
 
 **Outstanding physical obligations:** verify the exact flashed firmware marker, measure 3.3 V supply and GPIO-level compatibility, isolate each sensor, document pull-up/resistor/level-shifter configuration, collect a stable combined-bus observation interval, and verify Android receives SOS. Previous brownouts and the user-supplied dual-sensor failures make the device's safety/availability claim **OPEN**. The 97–99% SpO₂ values and varying pulse estimates are prototype computations, not clinical validation.
 
 **Final classification:** *machine-checked abstract safety constraints plus source-associated executable regressions and successful build checks; not a mathematical proof of the full hardware–software system.*
+
+**Rendering-validation note:** The repository-wide mathematical syntax audit checks every tracked Markdown file, including all fenced `math` and inline dollar expressions. It deliberately excludes disallowed formatting commands such as `\operatorname`, `\textbf`, and `\text` from mathematical expressions. GitHub's browser renderer remains the ultimate display check; static syntax checks are not a live-browser screenshot.

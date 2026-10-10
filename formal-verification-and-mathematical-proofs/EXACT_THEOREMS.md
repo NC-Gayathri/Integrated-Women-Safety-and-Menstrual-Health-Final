@@ -44,7 +44,7 @@ Here $A$ is the **abstract emission predicate**—not a byte-for-byte symbolic e
 ### P01 — emission requires IMPACT (UNSAT)
 
 ```math
-A\land(q\ne2)\quad\textbf{UNSAT}
+A\land(q\ne2)\quad\mathrm{UNSAT}
 \quad\Longrightarrow\quad A\Rightarrow(q=2).
 ```
 
@@ -53,7 +53,7 @@ The modeled guard cannot emit while in IDLE or FREE_FALL.
 ### P02 — a blind sample gap blocks emission (UNSAT)
 
 ```math
-A\land B\quad\textbf{UNSAT}
+A\land B\quad\mathrm{UNSAT}
 \quad\Longrightarrow\quad A\Rightarrow\neg B.
 ```
 
@@ -62,7 +62,7 @@ Once in a non-IDLE state, more than 150 ms between successful readings blocks an
 ### P03 — cooldown after a prior fall is enforced (UNSAT)
 
 ```math
-A\land C\quad\textbf{UNSAT}
+A\land C\quad\mathrm{UNSAT}
 \quad\Longrightarrow\quad A\Rightarrow\neg C.
 ```
 
@@ -71,7 +71,7 @@ A prior alert inside the unsigned 25,000-ms cooldown excludes new emission.
 ### P04 — readiness and successful read are mandatory (UNSAT)
 
 ```math
-A\land(\neg E\lor\neg V)\quad\textbf{UNSAT}
+A\land(\neg E\lor\neg V)\quad\mathrm{UNSAT}
 \quad\Longrightarrow\quad A\Rightarrow(E\land V).
 ```
 
@@ -80,7 +80,7 @@ Neither an unavailable sensor nor a failed accelerometer read can satisfy the mo
 ### P05 — near-one-g reading and sufficiently long modeled stationary interval (UNSAT)
 
 ```math
-A\land(\neg Z\lor\neg S\lor\neg L)\quad\textbf{UNSAT}
+A\land(\neg Z\lor\neg S\lor\neg L)\quad\mathrm{UNSAT}
 \quad\Longrightarrow\quad A\Rightarrow(Z\land S\land L).
 ```
 
@@ -89,7 +89,7 @@ This is a predicate/clock property only. It does not prove continuous real-world
 ### P06 — the impact deadline holds (UNSAT)
 
 ```math
-A\land\neg I\quad\textbf{UNSAT}
+A\land\neg I\quad\mathrm{UNSAT}
 \quad\Longrightarrow\quad A\Rightarrow\bigl(\Delta(t,t_i)\le2000\bigr).
 ```
 
@@ -99,7 +99,7 @@ The modeled fall cannot be reported after its post-impact timeout expires.
 
 ```math
 \exists\,\mathbf{x}:\quad A\land\neg H\land(t<25000)
-\quad\textbf{SAT}.
+\quad\mathrm{SAT}.
 ```
 
 The model does not require a boot-time cooldown when no previous alert exists. **SAT is not a guarantee that a physical fall is detected.**
@@ -109,7 +109,7 @@ The model does not require a boot-time cooldown when no previous alert exists. *
 ```math
 \exists\,\mathbf{x}:\quad
 A\land H\land\bigl(\Delta(t,t_a)\ge25000\bigr)
-\quad\textbf{SAT}.
+\quad\mathrm{SAT}.
 ```
 
 There exists a modeled state with a prior alert and an expired cooldown in which the guard can emit.
@@ -117,7 +117,7 @@ There exists a modeled state with a prior alert and an expired cooldown in which
 ### P09 — zero-valued sample timestamp does not waive the gap rule (UNSAT)
 
 ```math
-A\land(t_p=0)\land(t=800)\quad\textbf{UNSAT}.
+A\land(t_p=0)\land(t=800)\quad\mathrm{UNSAT}.
 ```
 
 When $q=2$ as required by $A$, the 800-ms gap is greater than 150 ms even though the previous sample timestamp equals zero. This specifically protects against treating an actual zero timestamp as a “no sample” sentinel.
@@ -129,7 +129,7 @@ When $q=2$ as required by $A$, the 800-ms gap is greater than 150 ms even though
 q=2,\qquad t_p=4294967196=2^{32}-100,\qquad t=10,\\
 \Delta(10,2^{32}-100)=110\le150,\\
 \exists\,\mathbf{x}:\ (q=2)\land(t_p=2^{32}-100)
- \land(t=10)\land\neg B\quad\textbf{SAT}.
+ \land(t=10)\land\neg B\quad\mathrm{SAT}.
 \end{gathered}
 ```
 
@@ -142,7 +142,7 @@ A 110-ms interval remains short when modular subtraction crosses zero.
 q=2,\quad t_p=4294966296=2^{32}-1000,\quad t=10,\\
 \Delta(10,2^{32}-1000)=1010>150,\\
 (q=2)\land(t_p=2^{32}-1000)\land(t=10)\land\neg B
-\quad\textbf{UNSAT}.
+\quad\mathrm{UNSAT}.
 \end{gathered}
 ```
 
@@ -155,7 +155,7 @@ A gap spanning 1,010 ms cannot masquerade as a short interval.
 H,\quad t_a=4294967040=2^{32}-256,\quad t=1000,\\
 \Delta(1000,2^{32}-256)=1256<25000,\\
 A\land H\land(t_a=2^{32}-256)\land(t=1000)
-\quad\textbf{UNSAT}.
+\quad\mathrm{UNSAT}.
 \end{gathered}
 ```
 
@@ -180,7 +180,7 @@ Here $D$ is the modeled shared-fault diagnosis, and $J$ is the **permission to a
 ### R01 — no restart while either sensor remains ready (UNSAT)
 
 ```math
-J\land(R_O\lor R_M)\quad\textbf{UNSAT}
+J\land(R_O\lor R_M)\quad\mathrm{UNSAT}
 \quad\Longrightarrow\quad J\Rightarrow(\neg R_O\land\neg R_M).
 ```
 
@@ -189,7 +189,7 @@ The shared-controller restart guard excludes the healthy-sensor case.
 ### R02 — a single fault cannot authorize a shared restart (UNSAT)
 
 ```math
-J\land(\neg O\lor\neg M)\quad\textbf{UNSAT}
+J\land(\neg O\lor\neg M)\quad\mathrm{UNSAT}
 \quad\Longrightarrow\quad J\Rightarrow(O\land M).
 ```
 
@@ -198,7 +198,7 @@ Both independently recorded sensor fault flags are required.
 ### R03 — correlation beyond three seconds is disallowed (UNSAT)
 
 ```math
-J\land\bigl(\Delta(t,t_f)>3000\bigr)\quad\textbf{UNSAT}.
+J\land\bigl(\Delta(t,t_f)>3000\bigr)\quad\mathrm{UNSAT}.
 ```
 
 A reported opposite-sensor failure outside the 3,000-ms window cannot satisfy the modeled restart guard.
@@ -206,7 +206,7 @@ A reported opposite-sensor failure outside the 3,000-ms window cannot satisfy th
 ### R04 — sampled LOW SDA suppresses restart (UNSAT)
 
 ```math
-J\land D_S\quad\textbf{UNSAT}
+J\land D_S\quad\mathrm{UNSAT}
 \quad\Longrightarrow\quad J\Rightarrow\neg D_S.
 ```
 
@@ -215,7 +215,7 @@ This concerns a **sampled GPIO logic level**, not a laboratory determination of 
 ### R05 — sampled LOW SCL suppresses restart (UNSAT)
 
 ```math
-J\land D_C\quad\textbf{UNSAT}
+J\land D_C\quad\mathrm{UNSAT}
 \quad\Longrightarrow\quad J\Rightarrow\neg D_C.
 ```
 
@@ -225,7 +225,7 @@ Likewise, held-low SCL cannot satisfy the modeled restart condition.
 
 ```math
 J\land H_R\land\bigl(\Delta(t,t_r)<10000\bigr)
-\quad\textbf{UNSAT}.
+\quad\mathrm{UNSAT}.
 ```
 
 A previous shared-restart attempt less than 10,000 ms ago excludes a second permitted restart.
@@ -235,7 +235,7 @@ A previous shared-restart attempt less than 10,000 ms ago excludes a second perm
 ```math
 \exists\,\mathbf{y}:\quad J\land H_R
  \land\bigl(\Delta(t,t_r)\ge10000\bigr)
-\quad\textbf{SAT}.
+\quad\mathrm{SAT}.
 ```
 
 The guard is not permanently disabled after an earlier restart.
@@ -244,7 +244,7 @@ The guard is not permanently disabled after an earlier restart.
 
 ```math
 \exists\,\mathbf{y}:\quad J\land\neg H_R
-\quad\textbf{SAT}.
+\quad\mathrm{SAT}.
 ```
 
 The first-attempt path is not vacuous.
@@ -260,7 +260,7 @@ R_O' :=
 R_O,&\neg J.
 \end{cases}
 \qquad
-J\land W\land R_O'\quad\textbf{UNSAT}.
+J\land W\land R_O'\quad\mathrm{UNSAT}.
 ```
 
 **Scope warning:** this result follows from how the *abstract post-state* is defined. It does not independently prove that deployed C++ always resets the flag, or that firmware reinitialization works electrically. The C++ host regressions provide separate executable support.
@@ -276,7 +276,7 @@ V_H' :=
 V_H,&\neg J.
 \end{cases}
 \qquad
-J\land V_H\land V_H'\quad\textbf{UNSAT}.
+J\land V_H\land V_H'\quad\mathrm{UNSAT}.
 ```
 
 **Scope warning:** this is a **transition-definition check**, not an independent firmware proof. It confirms consistency of the chosen fail-closed abstract model; real firmware tests are still required for the implementation.
@@ -288,7 +288,7 @@ J\land V_H\land V_H'\quad\textbf{UNSAT}.
 t_r=4294962296=2^{32}-5000,\qquad t=4000,\\
 \Delta(4000,2^{32}-5000)=9000<10000,\\
 J\land H_R\land(t_r=2^{32}-5000)\land(t=4000)
-\quad\textbf{UNSAT}.
+\quad\mathrm{UNSAT}.
 \end{gathered}
 ```
 
@@ -302,7 +302,7 @@ t_r=4294962296=2^{32}-5000,\qquad t=7000,\\
 \Delta(7000,2^{32}-5000)=12000\ge10000,\\
 \exists\,\mathbf{y}:\ J\land H_R
 \land(t_r=2^{32}-5000)\land(t=7000)
-\quad\textbf{SAT}.
+\quad\mathrm{SAT}.
 \end{gathered}
 ```
 
