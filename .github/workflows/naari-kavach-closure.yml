@@ -85,7 +85,7 @@ jobs:
           grep -Fq '#define BLE_MTU             64' "$F"
           grep -Fq 'BLEDevice::setMTU(BLE_MTU)' "$F"
           grep -Fq 'sendSensorHealthSnapshot();' "$F"
-          grep -Fq '[FIRMWARE] formal-timing-v12-20261010' "$F"
+          grep -Fq '[FIRMWARE] shared-bus-diagnostic-v13-20261010' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"
@@ -121,6 +121,9 @@ jobs:
 
       - name: Check exact 32-bit fall safety abstraction and SOS invariant
         run: python verification/prove_naari.py
+
+      - name: Prove shared I2C controller recovery fail-closed and cooldown guards
+        run: python verification/prove_i2c_recovery.py
 
   firmware-compile:
     name: ESP32 compile

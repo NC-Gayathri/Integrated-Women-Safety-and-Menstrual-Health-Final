@@ -28,7 +28,7 @@ def check_source_guard():
         r"if\s*\(now\s*-\s*stationaryStartedAt\s*>=\s*FALL_STATIONARY_MIN_MS\)",
         r"sendBleEvent\(\"FALL_DETECTED\"\)",
         r"hasFallTriggered\s*=\s*true;",
-        r"\[FIRMWARE\] formal-timing-v12-20261010",
+        r"\[FIRMWARE\] shared-bus-diagnostic-v13-20261010",
     ]:
         assert re.search(pattern, fw), "Model/code drift: " + pattern
     for pattern in [

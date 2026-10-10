@@ -11,7 +11,7 @@ from the repository's current default branch, `master`.
 The current Serial boot marker is:
 
 ```text
-[FIRMWARE] formal-timing-v12-20261010
+[FIRMWARE] shared-bus-diagnostic-v13-20261010
 ```
 
 Idle optical reporting is event-driven in v9: with no finger present the firmware keeps sampling for health/recovery but does not print periodic LOW_LIGHT/NO_VALID_READING lines. Finger placement/removal, numeric vitals, SOS/fall, BLE transitions, and genuine sensor faults remain visible.
@@ -40,7 +40,7 @@ The repository also contains older or purpose-specific firmware variants. They a
 - **`esp32_firmware/esp32_firmware.ino`** — legacy BLE GATT firmware.
 - diagnostic/scanner sketches — intentionally narrow hardware-diagnostic programs.
 
-Do not flash a legacy binary when validating `formal-timing-v12-20261010`.
+Do not flash a legacy binary when validating `shared-bus-diagnostic-v13-20261010`.
 
 ---
 
@@ -77,3 +77,9 @@ See the [9 October independent audit and physical acceptance ledger](../document
 ## Mathematical safety abstraction (v12, 10 October 2026)
 
 The v12 fix treats a zero-valued previous accelerometer timestamp as valid, preserving gap rejection across a 32-bit millisecond-counter rollover. Android BLE parsing also requires exact `SOS`/`STATUS:ONLINE` strings and complete decimal HR/SpO2 payloads. The proof runner and precise limitations are described in [formal verification assurance](../verification/README.md). A successful SMT query proves the described model property under its explicit assumptions, not every firmware, radio, clinical, or hardware behavior.
+
+## Repeated two-sensor I²C failure mitigation (v13, 10 October 2026)
+
+The newest device log shows optical MAX30102 register-read failures followed by MPU6500 I²C failures; both later report READY and fail again. This is **not** accepted physical stability. v13 logs TX/RX failure detail and current SDA/SCL pin levels, correlates two sensor errors within 3 seconds, and conditionally reinitializes the ESP32's Wire controller at most once per 10 seconds **only when both devices are down and both lines sample HIGH**. LOW bus lines are diagnosed without pulsing them. The I²C controller restart always requires independent sensor revalidation; it never manufactures an optical reading or authorizes a physical acceptance claim.
+
+See the [v13 root-cause and physical acceptance guide](../documentation/NAARI_KAVACH_SHARED_BUS_DIAGNOSIS_V13.md) and the [machine-checked safety model](../verification/README.md). The actual board's firmware version is only known once its live startup log displays `[FIRMWARE] shared-bus-diagnostic-v13-20261010`.

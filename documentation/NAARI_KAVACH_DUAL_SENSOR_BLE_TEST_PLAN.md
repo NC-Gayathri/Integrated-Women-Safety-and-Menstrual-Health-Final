@@ -189,4 +189,4 @@ Final closure status must be based on observed evidence, not on code inspection 
 
 ## 11. Evidence ledger for v11
 
-The current firmware's boot marker is `[FIRMWARE] formal-timing-v12-20261010`. A valid physical fall test must confirm it from the actual board. Refer to [the independent 9 October software and hardware audit](NAARI_KAVACH_FORMAL_AUDIT_2026-10-09.md) for the first-boot/cooldown and sampled-motion-continuity fixes, blocked physical measurements, and final acceptance standards.
+The current firmware's boot marker is `[FIRMWARE] shared-bus-diagnostic-v13-20261010`. A valid physical fall test must confirm it from the actual board. Refer to [the independent 9 October software and hardware audit](NAARI_KAVACH_FORMAL_AUDIT_2026-10-09.md) for the first-boot/cooldown and sampled-motion-continuity fixes, blocked physical measurements, and final acceptance standards.

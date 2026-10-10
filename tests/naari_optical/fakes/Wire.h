@@ -17,6 +17,8 @@ struct WireFake {
   int transientWrites = 0, pointerNacks = 0, fifoRequests = 0;
   int failureMs = -1; // -1 models a timeout; nonnegative models a fast NACK.
   unsigned int transactions = 0;
+  unsigned int busRestarts = 0, busBegins = 0;
+  bool beginOk = true;
   unsigned long operationMs = 1;
   uint16_t timeoutMs = 50;
 
@@ -49,7 +51,8 @@ struct WireFake {
     return mpuPresent && addr == mpuAddress;
   }
 
-  void begin(int, int) {}
+  bool begin(int, int) { ++busBegins; return beginOk; }
+  bool end() { ++busRestarts; return true; }
   void setClock(int) {}
   void setTimeOut(uint16_t ms) { timeoutMs = ms; }
   void beginTransmission(uint8_t addr) { address = addr; tx.clear(); nonStop = false; }
