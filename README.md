@@ -1,4 +1,14 @@
-# Welcome to your Expo app 👋
+# NAARI KAVACH — wearable and Android integration
+
+## Formal Verification and Mathematical Proofs
+
+The entire formal proof dossier is in [**Formal Verification and Mathematical Proofs**](formal-verification-and-mathematical-proofs/README.md), including [**all 24 numbered Z3 properties in GitHub-native LaTeX**](formal-verification-and-mathematical-proofs/EXACT_THEOREMS.md), [**SOS mathematical induction**](formal-verification-and-mathematical-proofs/SOS_COUNTER_INDUCTION.md), and [**reproducible proof toolchain**](formal-verification-and-mathematical-proofs/PROOF_SCOPE_AND_REPRODUCTION.md).
+
+**Scope:** these are abstract safety-model checks with regression/compile evidence, **not** a full hardware–software proof. The recurring dual-sensor I²C failures require a physical fault-isolation and acceptance run.
+
+---
+
+## Expo application setup
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 

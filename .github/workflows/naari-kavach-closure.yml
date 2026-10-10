@@ -17,7 +17,7 @@ on:
       - "scripts/test_naari_*.cjs"
       - ".github/scripts/**"
       - "tests/naari_optical/**"
-      - "verification/**"
+      - "formal-verification-and-mathematical-proofs/**"
       - "tsconfig.naari-ci.json"
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
       - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
@@ -117,13 +117,16 @@ jobs:
           python-version: '3.12'
 
       - name: Install pinned SMT solver
-        run: python -m pip install --disable-pip-version-check z3-solver==5.1.0.0
+        run: python -m pip install --disable-pip-version-check -r formal-verification-and-mathematical-proofs/requirements.txt
 
       - name: Check exact 32-bit fall safety abstraction and SOS invariant
-        run: python verification/prove_naari.py
+        run: python "formal-verification-and-mathematical-proofs/prove_naari.py"
 
       - name: Prove shared I2C controller recovery fail-closed and cooldown guards
-        run: python verification/prove_i2c_recovery.py
+        run: python "formal-verification-and-mathematical-proofs/prove_i2c_recovery.py"
+
+      - name: Prove complete 24-property GitHub LaTeX dossier and path integrity
+        run: python "formal-verification-and-mathematical-proofs/check_proof_documentation.py"
 
   firmware-compile:
     name: ESP32 compile

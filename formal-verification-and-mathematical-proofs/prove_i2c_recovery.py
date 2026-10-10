@@ -52,6 +52,7 @@ BASE = r"""
 (declare-const sda_low Bool)
 (declare-const scl_low Bool)
 (declare-const began Bool)
+(declare-const previous_hr_valid Bool)
 (define-fun paired_recent () Bool
  (and opt_reported mpu_reported
       (bvule (bvsub now opposite_fault_at) (_ bv3000 32))))
@@ -64,11 +65,12 @@ BASE = r"""
  (and paired_recent both_unavailable cooldown_passed))
 (define-fun restart () Bool
  (and diagnostic (not sda_low) (not scl_low)))
-; Firmware deliberately invalidates all outputs after attempting a restart.
+; Explicit abstract transition assignments; these post-state checks
+; follow from the chosen model, NOT from symbolic C++ execution.
 (define-fun output_ready_after_restart () Bool
- (and (not restart) opt_ready))
+ (ite restart false opt_ready))
 (define-fun stale_hr_after_restart () Bool
- (and (not restart) opt_ready))
+ (ite restart false previous_hr_valid))
 """
 CLAIMS = [
 ("R01 no restart with one sensor healthy", "unsat", "(and restart (or opt_ready mpu_ready))"),
@@ -86,7 +88,7 @@ CLAIMS = [
 ("R09 fresh success cannot bypass revalidation", "unsat",
  "(and restart began output_ready_after_restart)"),
 ("R10 reset cannot retain modeled stale readings", "unsat",
- "(and restart stale_hr_after_restart)"),
+ "(and restart previous_hr_valid stale_hr_after_restart)"),
 ("R11 restart denied for 9000ms over wrap", "unsat",
  "(and restart previously_restarted (= last_restart_at (_ bv4294962296 32)) (= now (_ bv4000 32)))"),
 ("R12 restart permitted after 12000ms over wrap", "sat",
