@@ -321,6 +321,7 @@ int main(int argc, char** argv) {
       require(mpuReady, "MPU must recover after runtime backoff");
     } else if (name == "shared_controller_recovers" ||
                name == "shared_held_sda_does_not_clock" ||
+               name == "shared_held_scl_does_not_clock" ||
                name == "shared_restart_failure_safe") {
       Wire.enableMpu(0x70);
       require(initializeMpuAt(0x68) && identifyAndConfigureOptical(),
@@ -332,6 +333,7 @@ int main(int argc, char** argv) {
       Wire.failReads = true;
       Wire.failureMs = 0;
       if (name == "shared_held_sda_does_not_clock") fakeI2cSdaLevel = LOW;
+      if (name == "shared_held_scl_does_not_clock") fakeI2cSclLevel = LOW;
       if (name == "shared_restart_failure_safe") Wire.beginOk = false;
       Serial.output.clear();
       for (int i = 0; i < 4; ++i) { delay(21); loop(); }
@@ -344,7 +346,8 @@ int main(int argc, char** argv) {
       require(Serial.output.find("SDA=") != std::string::npos &&
               Serial.output.find("SCL=") != std::string::npos,
               "diagnostics must record actual pin levels");
-      if (name == "shared_held_sda_does_not_clock") {
+      if (name == "shared_held_sda_does_not_clock" ||
+          name == "shared_held_scl_does_not_clock") {
         require(Wire.busRestarts == 0, "held-low shared bus must not be driven/restarted");
         require(Serial.output.find("LINE_HELD_LOW") != std::string::npos,
                 "line-low faults require an explicit physical intervention diagnosis");
@@ -360,7 +363,8 @@ int main(int argc, char** argv) {
       noteSensorTransportFault(false);
       require(Wire.busRestarts == attempts,
               "repeated shared fault reports must be rate-limited");
-      if (name != "shared_held_sda_does_not_clock") {
+      if (name != "shared_held_sda_does_not_clock" &&
+          name != "shared_held_scl_does_not_clock") {
         delay(6200);
         Wire.beginOk = true;
         noteSensorTransportFault(true);
@@ -372,6 +376,7 @@ int main(int argc, char** argv) {
                 "a controller restart alone must not claim sensor or vitals readiness");
       }
       fakeI2cSdaLevel = HIGH;
+      fakeI2cSclLevel = HIGH;
       Wire.failReads = false;
       delay(2100);
       updateMpuFallDetection();
