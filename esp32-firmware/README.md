@@ -11,7 +11,7 @@ from the repository's current default branch, `master`.
 The current Serial boot marker is:
 
 ```text
-[FIRMWARE] verified-fall-timing-v11-20261009
+[FIRMWARE] formal-timing-v12-20261010
 ```
 
 Idle optical reporting is event-driven in v9: with no finger present the firmware keeps sampling for health/recovery but does not print periodic LOW_LIGHT/NO_VALID_READING lines. Finger placement/removal, numeric vitals, SOS/fall, BLE transitions, and genuine sensor faults remain visible.
@@ -40,7 +40,7 @@ The repository also contains older or purpose-specific firmware variants. They a
 - **`esp32_firmware/esp32_firmware.ino`** — legacy BLE GATT firmware.
 - diagnostic/scanner sketches — intentionally narrow hardware-diagnostic programs.
 
-Do not flash a legacy binary when validating `verified-fall-timing-v11-20261009`.
+Do not flash a legacy binary when validating `formal-timing-v12-20261010`.
 
 ---
 
@@ -73,3 +73,7 @@ sensor PCB. Never physically drop an ESP32 connected to USB or a phone.
 The initial 25-second period following boot is no longer incorrectly treated as a cooldown: cooldown starts only after a real fall alert. The detector also cancels a pending fall when successive successful accelerometer observations have a gap greater than 150 ms; missing samples cannot establish continuous stillness. Regression coverage includes the first fall after startup, a 700-ms motion evidence gap and a genuine post-alert cooldown. This does not fix real electrical faults or medically validate fall detection.
 
 See the [9 October independent audit and physical acceptance ledger](../documentation/NAARI_KAVACH_FORMAL_AUDIT_2026-10-09.md).
+
+## Mathematical safety abstraction (v12, 10 October 2026)
+
+The v12 fix treats a zero-valued previous accelerometer timestamp as valid, preserving gap rejection across a 32-bit millisecond-counter rollover. Android BLE parsing also requires exact `SOS`/`STATUS:ONLINE` strings and complete decimal HR/SpO2 payloads. The proof runner and precise limitations are described in [formal verification assurance](../verification/README.md). A successful SMT query proves the described model property under its explicit assumptions, not every firmware, radio, clinical, or hardware behavior.

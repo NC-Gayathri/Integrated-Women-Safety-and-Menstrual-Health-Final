@@ -12,7 +12,7 @@ if [[ ! "$repair_head" =~ ^[0-9a-f]{40}$ ]]; then
 fi
 
 if [[ -z "$repair_branch" ]] ||
-   [[ "$repair_branch" != fix/naari-kavach-* ]] ||
+   [[ "$repair_branch" != fix/naari-kavach-* && "$repair_branch" != fix/naari-formal-assurance-v12 ]] ||
    [[ "$repair_branch" == refs/* ]] ||
    ! git check-ref-format --branch "$repair_branch" >/dev/null 2>&1; then
   echo 'Missing or invalid verified repair branch; refusing deletion.' >&2

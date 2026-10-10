@@ -433,7 +433,9 @@ void updateMpuFallDetection() {
   mpuConsecutiveErrors = 0;
 
   // A blind interval cannot substantiate free-fall or continuous stillness.
-  if (fallState != FALL_IDLE && previousMpuSample != 0 &&
+  // Timestamp zero is a valid millis() value after counter wraparound.
+  // In a non-IDLE state a preceding MPU sample necessarily exists.
+  if (fallState != FALL_IDLE &&
       now - previousMpuSample > MPU_SAMPLE_MAX_GAP_MS) {
     fallState = FALL_IDLE;
     stationaryStartedAt = 0;
@@ -1206,7 +1208,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
-  Serial.println("[FIRMWARE] verified-fall-timing-v11-20261009");
+  Serial.println("[FIRMWARE] formal-timing-v12-20261010");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);

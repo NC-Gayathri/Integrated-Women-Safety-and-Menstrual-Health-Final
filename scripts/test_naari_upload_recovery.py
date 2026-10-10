@@ -26,7 +26,7 @@ firmware = FIRMWARE.read_text(encoding='utf-8')
 match = re.search(r'Serial\.println\("\[FIRMWARE\] ([^"]+)"\);', firmware)
 assert match, 'firmware must expose a serial build marker'
 marker = match.group(1)
-assert marker == 'verified-fall-timing-v11-20261009', f'unexpected current marker: {marker}'
+assert marker == 'formal-timing-v12-20261010', f'unexpected current marker: {marker}'
 expected_line = f'[FIRMWARE] {marker}'
 
 for path in [README, RECOVERY, OPTICAL]:

@@ -17,6 +17,7 @@ on:
       - "scripts/test_naari_*.cjs"
       - ".github/scripts/**"
       - "tests/naari_optical/**"
+      - "verification/**"
       - "tsconfig.naari-ci.json"
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
       - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
@@ -84,7 +85,7 @@ jobs:
           grep -Fq '#define BLE_MTU             64' "$F"
           grep -Fq 'BLEDevice::setMTU(BLE_MTU)' "$F"
           grep -Fq 'sendSensorHealthSnapshot();' "$F"
-          grep -Fq '[FIRMWARE] verified-fall-timing-v11-20261009' "$F"
+          grep -Fq '[FIRMWARE] formal-timing-v12-20261010' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"
@@ -103,6 +104,23 @@ jobs:
           fi
 
           echo "Firmware contract PASS"
+
+  formal-smt:
+    name: Mathematical SMT safety abstraction
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned SMT solver
+        run: python -m pip install --disable-pip-version-check z3-solver==5.1.0.0
+
+      - name: Check exact 32-bit fall safety abstraction and SOS invariant
+        run: python verification/prove_naari.py
 
   firmware-compile:
     name: ESP32 compile
@@ -212,7 +230,7 @@ jobs:
 
   delete-merged-repair-branch:
     name: Delete merged repair branch
-    needs: [firmware-contract, firmware-compile, app-static, android-native]
+    needs: [firmware-contract, firmware-compile, app-static, android-native, formal-smt]
     if: github.event_name == 'push' && github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     permissions:
@@ -244,7 +262,8 @@ jobs:
               pr.merge_commit_sha === context.sha &&
               pr.base.ref === defaultBranch &&
               pr.head.repo?.full_name === `${owner}/${repo}` &&
-              pr.head.ref.startsWith('fix/naari-kavach-')
+              (pr.head.ref.startsWith('fix/naari-kavach-') ||
+               pr.head.ref === 'fix/naari-formal-assurance-v12')
             );
 
             if (candidates.length === 0) {

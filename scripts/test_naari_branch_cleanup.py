@@ -41,6 +41,22 @@ with tempfile.TemporaryDirectory(prefix='naari-cleanup-') as temp:
     assert not git(remote, 'for-each-ref', '--format=%(refname)', REF)
     print('PASS cleanup deletes exactly the verifier-approved branch revision')
 
+    # v12 branch name is an explicitly allowlisted *exact* exception.
+    v12_branch = 'fix/naari-formal-assurance-v12'
+    v12_ref = f'refs/heads/{v12_branch}'
+    git(work, 'push', 'origin', f'HEAD:{v12_ref}')
+    env['REPAIR_BRANCH'] = v12_branch
+    env['REPAIR_HEAD'] = newer
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode == 0, attempt.stderr
+    assert not git(remote, 'for-each-ref', '--format=%(refname)', v12_ref)
+    print('PASS cleanup deletes exact v12 formal-assurance branch')
+
+    env['REPAIR_BRANCH'] = 'fix/naari-formal-assurance-v12-extra'
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode != 0, 'lookalike v12 branch must not be allowlisted'
+    print('PASS cleanup rejects v12 lookalike branch')
+
     env['REPAIR_HEAD'] = ''
     attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
     assert attempt.returncode != 0, 'missing lease must fail closed'

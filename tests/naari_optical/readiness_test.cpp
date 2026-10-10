@@ -227,6 +227,23 @@ int main(int argc, char** argv) {
       fall();
       require(Serial.output.find("[EVENT] FALL_DETECTED") != std::string::npos,
               "fall detector must rearm after cooldown");
+    } else if (name == "mpu_timestamp_zero_blind_gap_rejected") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68), "MPU must initialize");
+      // Probe a valid zero timestamp after a 32-bit millis wrap. In a pending
+      // IMPACT state, 0 is a real previous sample time, not an absent sample.
+      testClock = 1000;
+      lastMpuSample = 0;
+      fallState = FALL_IMPACT;
+      impactStartedAt = 100;
+      stationaryStartedAt = 100;
+      Wire.mpuRegs[0x3B] = Wire.mpuRegs[0x3D] = 0;
+      Wire.mpuRegs[0x3F] = 0x10;
+      Serial.output.clear();
+      updateMpuFallDetection();
+      require(Serial.output.find("[EVENT] FALL_DETECTED") == std::string::npos,
+              "blind interval across a valid zero timestamp cannot confirm fall");
+      require(fallState == FALL_IDLE, "blind interval must reset the pending fall");
     } else if (name == "mpu_handling_spike_rejected") {
       Wire.enableMpu(0x70);
       require(initializeMpuAt(0x68), "initial MPU must be ready");
