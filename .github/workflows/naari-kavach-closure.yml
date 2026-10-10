@@ -18,6 +18,8 @@ on:
       - ".github/scripts/**"
       - "tests/naari_optical/**"
       - "formal-verification-and-mathematical-proofs/**"
+      - "README.md"
+      - "documentation/NAARI_KAVACH_SHARED_BUS_DIAGNOSIS_V13.md"
       - "tsconfig.naari-ci.json"
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
       - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
