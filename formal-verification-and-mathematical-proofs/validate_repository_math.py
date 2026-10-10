@@ -38,10 +38,19 @@ def verify(expr, where):
             depth -= 1
             assert depth >= 0, f"{where}: extra closing brace"
     assert depth == 0, f"{where}: unbalanced braces"
-    begin = re.findall(r"\\begin\{([a-zA-Z*]+)\}", expr)
-    end = re.findall(r"\\end\{([a-zA-Z*]+)\}", expr)
-    assert begin == end, f"{where}: unbalanced environments {begin} {end}"
-    assert set(begin) <= ENVS, f"{where}: unreviewed environment"
+    # Nested environments close in reverse order; comparing begin/end
+    # arrays directly incorrectly rejects aligned{cases ... end{cases}}.
+    env_stack = []
+    for action, environment in re.findall(
+            r"\\(begin|end)\{([a-zA-Z*]+)\}", expr):
+        assert environment in ENVS, f"{where}: unreviewed environment {environment}"
+        if action == "begin":
+            env_stack.append(environment)
+        else:
+            assert env_stack and env_stack[-1] == environment, (
+                f"{where}: unmatched ending environment {environment}")
+            env_stack.pop()
+    assert not env_stack, f"{where}: unclosed environments {env_stack}"
     assert expr.count(r"\left") == expr.count(r"\right"), f"{where}: left/right mismatch"
 
 def extract(text, filename):
