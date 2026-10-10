@@ -319,6 +319,78 @@ int main(int argc, char** argv) {
       Wire.mpuPresent = true; testClock = failedAt + 2000;
       updateMpuFallDetection();
       require(mpuReady, "MPU must recover after runtime backoff");
+    } else if (name == "shared_controller_recovers" ||
+               name == "shared_held_sda_does_not_clock" ||
+               name == "shared_restart_failure_safe") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68) && identifyAndConfigureOptical(),
+              "both sensors must have individually verified initial readiness");
+      // A plausible pre-fault reading is never trustworthy post-I2C loss.
+      heartRateValid = spo2Valid = fingerPresent = true;
+      filteredBpm = 94; latestSpo2 = 98;
+      delay(5000);
+      Wire.failReads = true;
+      Wire.failureMs = 0;
+      if (name == "shared_held_sda_does_not_clock") fakeI2cSdaLevel = LOW;
+      if (name == "shared_restart_failure_safe") Wire.beginOk = false;
+      Serial.output.clear();
+      for (int i = 0; i < 4; ++i) { delay(21); loop(); }
+      require(!opticalReady && !mpuReady,
+              "dual-bus fault must leave both sensors NOT_READY");
+      require(!heartRateValid && !spo2Valid && !fingerPresent && fallState == FALL_IDLE,
+              "shared fault must invalidate both vitals and the pending fall");
+      require(Serial.output.find("SHARED_I2C_FAULT") != std::string::npos,
+              "two sensor fault transitions must emit one shared-bus diagnosis");
+      require(Serial.output.find("SDA=") != std::string::npos &&
+              Serial.output.find("SCL=") != std::string::npos,
+              "diagnostics must record actual pin levels");
+      if (name == "shared_held_sda_does_not_clock") {
+        require(Wire.busRestarts == 0, "held-low shared bus must not be driven/restarted");
+        require(Serial.output.find("LINE_HELD_LOW") != std::string::npos,
+                "line-low faults require an explicit physical intervention diagnosis");
+      } else {
+        require(Wire.busRestarts == 1, "correlated fault must attempt exactly one controller restart");
+        require(Serial.output.find(name == "shared_restart_failure_safe" ?
+                     "CONTROLLER_REINIT=FAILED" : "CONTROLLER_REINIT=OK") != std::string::npos,
+                "restart outcome must be honestly classified");
+      }
+      const auto attempts = Wire.busRestarts;
+      delay(4000);
+      noteSensorTransportFault(true);
+      noteSensorTransportFault(false);
+      require(Wire.busRestarts == attempts,
+              "repeated shared fault reports must be rate-limited");
+      if (name != "shared_held_sda_does_not_clock") {
+        delay(6200);
+        Wire.beginOk = true;
+        noteSensorTransportFault(true);
+        noteSensorTransportFault(false);
+        require(Wire.busRestarts == attempts + 1,
+                "one further controller reset is permitted only after 10 seconds");
+        require(!opticalReady && !mpuReady &&
+                !heartRateValid && !spo2Valid,
+                "a controller restart alone must not claim sensor or vitals readiness");
+      }
+      fakeI2cSdaLevel = HIGH;
+      Wire.failReads = false;
+      delay(2100);
+      updateMpuFallDetection();
+      updateOpticalSensor();
+      require(opticalReady && mpuReady,
+              "both sensors may return READY only after real re-identification and readback");
+      require(!heartRateValid && !spo2Valid && !fingerPresent,
+              "no stale clinical numbers after successful revalidation");
+    } else if (name == "shared_one_sensor_only_no_restart") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68) && identifyAndConfigureOptical(),
+              "both sensors must first be READY");
+      Wire.failReadReg = 0x04;
+      Serial.output.clear();
+      updateOpticalSensor();
+      require(!opticalReady && mpuReady && Wire.busRestarts == 0,
+              "an optical-only fault must not reset the healthy MPU/controller");
+      require(Serial.output.find("SHARED_I2C_FAULT") == std::string::npos,
+              "one optical fault must not be misdiagnosed as dual-sensor loss");
     } else if (name == "bus_failure_sos" || name == "optical_failure_mpu_healthy") {
       Wire.enableMpu(0x70);
       require(initializeMpuAt(0x68) && identifyAndConfigureOptical(), "both sensors must start ready");
