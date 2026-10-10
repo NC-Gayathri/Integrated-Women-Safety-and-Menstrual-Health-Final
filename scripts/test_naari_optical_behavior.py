@@ -34,6 +34,7 @@ CASES = [
     'mpu_first_fall_after_boot', 'mpu_postimpact_gap_rejected', 'mpu_first_fall_cooldown',
     'mpu_timestamp_zero_blind_gap_rejected',
     'shared_controller_recovers', 'shared_held_sda_does_not_clock',
+    'shared_held_scl_does_not_clock',
     'shared_restart_failure_safe', 'shared_one_sensor_only_no_restart',
 ]
 with tempfile.TemporaryDirectory(prefix='naari-sensors-') as temporary:
