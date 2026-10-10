@@ -286,7 +286,8 @@ jobs:
               pr.base.ref === defaultBranch &&
               pr.head.repo?.full_name === `${owner}/${repo}` &&
               (pr.head.ref.startsWith('fix/naari-kavach-') ||
-               pr.head.ref === 'fix/naari-formal-assurance-v12')
+               pr.head.ref === 'fix/naari-formal-assurance-v12' ||
+               pr.head.ref === 'fix/naari-github-math-render-v15')
             );
 
             if (candidates.length === 0) {
