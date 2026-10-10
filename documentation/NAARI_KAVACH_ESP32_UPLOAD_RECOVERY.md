@@ -18,7 +18,7 @@ That failure happens **before the new application firmware can run**. It does no
 The current acceptance marker is:
 
 ```text
-[FIRMWARE] formal-timing-v12-20261010
+[FIRMWARE] shared-bus-diagnostic-v13-20261010
 ```
 
 Any older firmware marker is stale and must not be used as physical acceptance evidence.
@@ -118,7 +118,7 @@ Again, substitute the actual verified port. The historical filename is retained 
 Physical boot acceptance requires:
 
 ```text
-[FIRMWARE] formal-timing-v12-20261010
+[FIRMWARE] shared-bus-diagnostic-v13-20261010
 ```
 
 For the reported motion device, MPU acceptance then requires the current firmware to identify and configure the part, for example:
