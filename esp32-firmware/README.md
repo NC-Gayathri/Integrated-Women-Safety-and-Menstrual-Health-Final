@@ -85,3 +85,9 @@ The newest device log shows optical MAX30102 register-read failures followed by 
 See the [v13 root-cause and physical acceptance guide](../documentation/NAARI_KAVACH_SHARED_BUS_DIAGNOSIS_V13.md) and the [machine-checked safety model](../formal-verification-and-mathematical-proofs/README.md). The actual board's firmware version is only known once its live startup log displays `[FIRMWARE] shared-bus-diagnostic-v13-20261010`.
 
 **Complete mathematical record:** [24 numbered GitHub-rendered LaTeX formulas](../formal-verification-and-mathematical-proofs/EXACT_THEOREMS.md), [SOS counter induction](../formal-verification-and-mathematical-proofs/SOS_COUNTER_INDUCTION.md), and [executable solver setup](../formal-verification-and-mathematical-proofs/PROOF_SCOPE_AND_REPRODUCTION.md).
+
+## v16 — observable fall stages and confidence-gated prototype BPM
+
+The short-drop classifier accepts continuous <0.65g low-g for >=40ms, sampled >1.8g impact, then >=600ms post-impact in the **unchanged formally guarded** 0.80–1.30g band. Separate [FALL] milestones identify whether low-g, impact or stationary evidence is missing. A real phone still must receive exact `FALL_DETECTED` over subscribed BLE; serial alone is insufficient.
+
+IR contact alone is not evidence of heart rate. A numeric BPM needs IR AC > max(10, 0.0004 × IR DC) and 3 consistent consecutive peak intervals. This is a prototype noise gate, not calibration. See the [v16 controlled hardware test procedure](../documentation/NAARI_KAVACH_V16_FALL_PULSE_ACCEPTANCE.md) and [8 additional bounded SMT model checks](../formal-verification-and-mathematical-proofs/PULSE_CONFIDENCE_C01_C08.md). v16 boot verification requires `[ALGORITHM] fall-pulse-confidence-v16-20261010` after the retained v13 boot marker.
