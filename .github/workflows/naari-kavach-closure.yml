@@ -20,6 +20,7 @@ on:
       - "formal-verification-and-mathematical-proofs/**"
       - "README.md"
       - "documentation/NAARI_KAVACH_SHARED_BUS_DIAGNOSIS_V13.md"
+      - "documentation/NAARI_KAVACH_V16_FALL_PULSE_ACCEPTANCE.md"
       - "tsconfig.naari-ci.json"
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
       - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
@@ -88,6 +89,7 @@ jobs:
           grep -Fq 'BLEDevice::setMTU(BLE_MTU)' "$F"
           grep -Fq 'sendSensorHealthSnapshot();' "$F"
           grep -Fq '[FIRMWARE] shared-bus-diagnostic-v13-20261010' "$F"
+          grep -Fq '[ALGORITHM] fall-pulse-confidence-v16-20261010' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"
@@ -126,6 +128,9 @@ jobs:
 
       - name: Prove shared I2C controller recovery fail-closed and cooldown guards
         run: python "formal-verification-and-mathematical-proofs/prove_i2c_recovery.py"
+
+      - name: Prove 8 additional v16 multi-beat pulse confidence properties
+        run: python "formal-verification-and-mathematical-proofs/prove_pulse_confidence.py"
 
       - name: Prove complete 24-property GitHub LaTeX dossier and path integrity
         run: python "formal-verification-and-mathematical-proofs/check_proof_documentation.py"
