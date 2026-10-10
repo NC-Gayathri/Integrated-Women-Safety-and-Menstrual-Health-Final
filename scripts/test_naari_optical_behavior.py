@@ -30,6 +30,8 @@ CASES = [
     'mpu_runtime_backoff', 'bus_failure_sos', 'optical_failure_mpu_healthy',
     'mpu_fault_discards_fall', 'mpu_disconnect_discards_fall',
     'mpu6050_single_axis_drop', 'mpu6500_single_axis_drop',
+    'mpu_controlled_short_2g_drop', 'mpu_one_low_g_sample_rejected',
+    'mpu_postimpact_not_stable_rejected',
     'mpu_handling_spike_rejected', 'mpu_single_stationary_sample_rejected',
     'mpu_first_fall_after_boot', 'mpu_postimpact_gap_rejected', 'mpu_first_fall_cooldown',
     'mpu_timestamp_zero_blind_gap_rejected',
