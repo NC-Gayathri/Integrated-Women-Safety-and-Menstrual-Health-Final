@@ -45,8 +45,7 @@ assert "SOS-S1" in sos and "SOS-S2" in sos, "SOS induction absent"
 additional = (DIR / "PULSE_CONFIDENCE_C01_C08.md").read_text(encoding="utf-8")
 additional_runner = (DIR / "prove_pulse_confidence.py").read_text(encoding="utf-8")
 expected_c = {f"C{x:02d}" for x in range(1, 9)}
-documented_c = re.findall(r"^## (C\\d\\d)\\b", additional, re.MULTILINE)
-executed_c = re.findall(r'\\("C\\d\\d ', additional_runner)
+documented_c = re.findall(r"^## (C[0-9][0-9]):", additional, re.MULTILINE)
 assert len(documented_c) == 8 and set(documented_c) == expected_c, "v16 theorem omitted/duplicated"
 assert all(x in additional_runner for x in expected_c), "v16 solver obligations omitted"
 
