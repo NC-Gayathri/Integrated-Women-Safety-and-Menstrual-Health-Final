@@ -95,21 +95,23 @@ int main(int argc, char** argv) {
       require(heartRateValid && filteredBpm >= 74 && filteredBpm <= 76,
               "a changed stable 75 BPM cadence must be reacquired, not averaged into 67 BPM");
     } else if (name == "irregular_transients_not_valid") {
-      // One large pulse peak followed by unrelated short/long optical movements.
-      // Distinct intervals must not be averaged and reported as a fabricated BPM.
-      for (int i = 0; i < 1500; ++i) {
+      // Alternate true-looking but mutually inconsistent pulse periods.
+      // All samples are from this host-only test fixture, never generated
+      // inside the ESP32 firmware.
+      const int periods[] = {60, 110, 65, 125, 55, 100, 130, 70};
+      int index = 0, phase = 0;
+      for (int i = 0; i < 1600; ++i) {
         delay(10);
-        const int phase = i % 155;
-        const double wave = phase < 15 ? 950.0 :
-                            (phase >= 65 && phase < 79 ? -950.0 : 0.0);
-        processOpticalSample(static_cast<uint32_t>(30000 + 300 * (wave / 950.0)),
-                             static_cast<uint32_t>(60000 + wave));
+        const int period = periods[index % 8];
+        const double wave = sin(2.0 * 3.141592653589793 * phase / period);
+        processOpticalSample(static_cast<uint32_t>(30000 + 300 * wave),
+                             static_cast<uint32_t>(60000 + 1000 * wave));
+        if (++phase >= period) { phase = 0; ++index; }
       }
-      // Irregular optical noise is not the same as a validated physiological
-      // reference. This is a negative test for the confidence gate, not a
-      // claim of immunity to every repeated motion artifact.
-      require(consistentBeatIntervals <= HEART_MIN_CONSISTENT_INTERVALS,
-              "test should exercise the interval confidence counter");
+      report();
+      noNumbers();
+      require(consistentBeatIntervals < HEART_MIN_CONSISTENT_INTERVALS,
+              "inconsistent interbeat intervals must never be treated as a stable BPM");
     } else if (name == "step_red" || name == "step_ir" || name == "step_up" ||
                name == "step_red_100" || name == "step_ir_100") {
       pulse(); require(heartRateValid && spo2Valid, "fixture must first acquire valid estimates");
