@@ -19,6 +19,7 @@ required = {
     "PROOF_SCOPE_AND_REPRODUCTION.md", "prove_naari.py",
     "prove_i2c_recovery.py", "requirements.txt", "check_proof_documentation.py",
     "validate_repository_math.py", "check_mathjax_render.cjs",
+    "PULSE_CONFIDENCE_C01_C08.md", "prove_pulse_confidence.py",
 }
 assert required <= {p.name for p in DIR.iterdir()}, "Missing proof artifact"
 
@@ -39,6 +40,15 @@ assert len(doc_r) == 12 and set(doc_r) == expected_r, "An I2C theorem was omitte
 assert re.findall(r'\("P\d\d[^"\n]*",\s*"(unsat|sat)"', fall).count("sat") == 3
 assert re.findall(r'\("R\d\d[^"\n]*",\s*"(unsat|sat)"', i2c).count("sat") == 3
 assert "SOS-S1" in sos and "SOS-S2" in sos, "SOS induction absent"
+
+# Independently indexed eight additional v16 HR confidence properties.
+additional = (DIR / "PULSE_CONFIDENCE_C01_C08.md").read_text(encoding="utf-8")
+additional_runner = (DIR / "prove_pulse_confidence.py").read_text(encoding="utf-8")
+expected_c = {f"C{x:02d}" for x in range(1, 9)}
+documented_c = re.findall(r"^## (C[0-9][0-9]):", additional, re.MULTILINE)
+assert len(documented_c) == 8 and set(documented_c) == expected_c, "v16 theorem omitted/duplicated"
+assert all(x in additional_runner for x in expected_c), "v16 solver obligations omitted"
+
 
 # Fail closed if a runner keeps its P/R label but silently changes its SMT
 # model/claim bytes. Git blob SHA-1 is a revision identity, not a security proof.
@@ -83,6 +93,7 @@ for runner in ("prove_naari.py", "prove_i2c_recovery.py", "check_proof_documenta
 assert f"{FOLDER}/requirements.txt" in workflow, "CI dependency path not updated"
 assert f"{FOLDER}/validate_repository_math.py" in workflow
 assert f"{FOLDER}/check_mathjax_render.cjs" in workflow
+assert f"{FOLDER}/prove_pulse_confidence.py" in workflow, "New HR SMT proof absent from CI"
 assert "mathjax-full@3.2.2" in workflow, "MathJax version not pinned"
 
 

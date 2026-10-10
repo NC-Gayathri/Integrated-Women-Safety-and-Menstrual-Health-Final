@@ -43,7 +43,7 @@ void noNumbers() {
           "invalid input must not publish numeric vitals");
 }
 
-void levelPulse(uint32_t redDcLevel, uint32_t irDcLevel, int frames = 600) {
+void levelPulse(uint32_t redDcLevel, uint32_t irDcLevel, int frames = 1000) {
   for (int i = 0; i < frames; ++i) {
     delay(10);
     const double wave = sin(2.0 * 3.141592653589793 * i / 100);
@@ -65,6 +65,53 @@ int main(int argc, char** argv) {
               "clean 100-frame pulse must acquire 60 BPM");
       require(spo2Valid && latestSpo2 >= 94 && latestSpo2 <= 96,
               "clean ratio fixture must acquire the existing prototype estimate");
+    } else if (name == "early_bpm_is_not_valid") {
+      pulse(280, 100);
+      noNumbers();
+      require(consistentBeatIntervals < HEART_MIN_CONSISTENT_INTERVALS,
+              "one/two pulse intervals are not sufficient evidence for HR");
+      pulse(1600, 100);
+      require(heartRateValid && filteredBpm >= 59 && filteredBpm <= 61,
+              "four or more consistent beats must eventually acquire the true 60 BPM fixture");
+    } else if (name == "bright_flat_ripple_rejected") {
+      // Mirrors the ~246k-DC, ~62-AC weak oscillation from the real serial log.
+      // A bright stationary contact must not yield HEART_RATE:150 from noise.
+      for (int i = 0; i < 1600; ++i) {
+        delay(10);
+        const double wave = sin(2.0 * 3.141592653589793 * i / 40);
+        processOpticalSample(static_cast<uint32_t>(223000 + 70 * wave),
+                             static_cast<uint32_t>(246000 + 65 * wave));
+      }
+      report();
+      noNumbers();
+      require(irEnvelope < fmax(OPTICAL_MIN_IR_ENVELOPE,
+                                irDc * OPTICAL_MIN_IR_AC_FRACTION),
+              "weak bright optical ripple should fail the DC-relative pulse floor");
+    } else if (name == "stable_75_after_60_cadence_change") {
+      pulse(1600, 100);
+      require(heartRateValid && filteredBpm >= 59 && filteredBpm <= 61,
+              "must first establish true 60 BPM");
+      pulse(400, 80);
+      require(heartRateValid && filteredBpm >= 74 && filteredBpm <= 76,
+              "a changed stable 75 BPM cadence must be reacquired, not averaged into 67 BPM");
+    } else if (name == "irregular_transients_not_valid") {
+      // Alternate true-looking but mutually inconsistent pulse periods.
+      // All samples are from this host-only test fixture, never generated
+      // inside the ESP32 firmware.
+      const int periods[] = {60, 110, 65, 125, 55, 100, 130, 70};
+      int index = 0, phase = 0;
+      for (int i = 0; i < 1600; ++i) {
+        delay(10);
+        const int period = periods[index % 8];
+        const double wave = sin(2.0 * 3.141592653589793 * phase / period);
+        processOpticalSample(static_cast<uint32_t>(30000 + 300 * wave),
+                             static_cast<uint32_t>(60000 + 1000 * wave));
+        if (++phase >= period) { phase = 0; ++index; }
+      }
+      report();
+      noNumbers();
+      require(consistentBeatIntervals < HEART_MIN_CONSISTENT_INTERVALS,
+              "inconsistent interbeat intervals must never be treated as a stable BPM");
     } else if (name == "step_red" || name == "step_ir" || name == "step_up" ||
                name == "step_red_100" || name == "step_ir_100") {
       pulse(); require(heartRateValid && spo2Valid, "fixture must first acquire valid estimates");

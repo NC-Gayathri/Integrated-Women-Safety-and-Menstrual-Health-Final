@@ -8,6 +8,10 @@ The entire formal proof dossier is in [**Formal Verification and Mathematical Pr
 
 ---
 
+## Hardware acceptance for v16 fall detection and heart rate
+
+[Controlled fall and independent-reference BPM test protocol](documentation/NAARI_KAVACH_V16_FALL_PULSE_ACCEPTANCE.md). The proof dossier also contains [eight new v16 confidence-gate model checks](formal-verification-and-mathematical-proofs/PULSE_CONFIDENCE_C01_C08.md), separately from the previous 24 SMT queries. Physical accuracy remains unverified until instrumented tests pass.
+
 ## Expo application setup
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).

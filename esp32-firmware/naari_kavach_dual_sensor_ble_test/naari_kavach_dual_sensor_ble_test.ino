@@ -81,7 +81,8 @@ bool oldDeviceConnected = false;
 #define BUTTON_TRIPLE_CLICK_WINDOW_MS 1800
 #define BUTTON_DEBOUNCE_MS 50
 #define FALL_COOLDOWN_MS 25000
-#define FALL_FREE_FALL_MIN_MS 60
+// Keep a multi-sample low-g interval but detect shorter controlled drops.
+#define FALL_FREE_FALL_MIN_MS 40
 #define FALL_FREE_FALL_MAX_MS 600
 #define FALL_POST_IMPACT_TIMEOUT_MS 2000
 #define FALL_STATIONARY_MIN_MS 600
@@ -102,6 +103,10 @@ bool oldDeviceConnected = false;
 // (RED ~= 10k, IR ~= 20k) while rejecting the physical 3-5k weak-contact region.
 #define OPTICAL_VITAL_MIN_RED_DC 5000.0
 #define OPTICAL_VITAL_MIN_IR_DC 10000.0
+#define OPTICAL_MIN_IR_ENVELOPE 10.0
+#define OPTICAL_MIN_IR_AC_FRACTION 0.0004
+#define HEART_MIN_CONSISTENT_INTERVALS 3
+#define HEART_MAX_BEAT_DEVIATION 0.18f
 #define SENSOR_STATUS_INTERVAL_MS 5000
 #define LED_PULSE_MS 180
 
@@ -480,24 +485,27 @@ void updateMpuFallDetection() {
 
   switch (fallState) {
     case FALL_IDLE:
-      if (magnitude < 0.50f) {
+      if (magnitude < 0.65f) {
         fallState = FALL_FREE_FALL;
         freeFallStartedAt = now;
+        Serial.printf("[FALL] LOW_G_ENTER g=%.2f; awaiting impact.\n", magnitude);
       }
       break;
 
     case FALL_FREE_FALL: {
       const unsigned long freeFallMs = now - freeFallStartedAt;
-      if (magnitude < 0.50f) {
+      if (magnitude < 0.65f) {
         if (freeFallMs > FALL_FREE_FALL_MAX_MS) {
           fallState = FALL_IDLE;
         }
       } else if (freeFallMs >= FALL_FREE_FALL_MIN_MS &&
                  freeFallMs <= FALL_FREE_FALL_MAX_MS &&
-                 magnitude > 2.50f) {
+                 magnitude > 1.80f) {
         fallState = FALL_IMPACT;
         impactStartedAt = now;
         stationaryStartedAt = 0;
+        Serial.printf("[FALL] IMPACT g=%.2f low_g_ms=%lu; awaiting post-impact stability.\n",
+                      magnitude, freeFallMs);
       } else {
         // A single low-g sample followed by ordinary handling is not a fall.
         fallState = FALL_IDLE;
@@ -517,6 +525,7 @@ void updateMpuFallDetection() {
         if (now - stationaryStartedAt >= FALL_STATIONARY_MIN_MS) {
           lastFallTriggeredAt = now;
           hasFallTriggered = true;
+          Serial.println("[FALL] CONFIRMED low-g + impact + continuous near-1g samples.");
           sendBleEvent("FALL_DETECTED");
           pulseLed(500);
           fallState = FALL_IDLE;
@@ -562,6 +571,8 @@ double previousIrAc = 0.0;
 bool previousSlopePositive = false;
 unsigned long lastPeakAt = 0;
 float filteredBpm = 0.0f;
+float candidateBpm = 0.0f;
+uint8_t consistentBeatIntervals = 0;
 bool heartRateValid = false;
 
 static const int SPO2_WINDOW = 100;
@@ -595,6 +606,8 @@ void invalidateVitalEstimates() {
   lastPeakAt = 0;
   peakArmed = false;
   filteredBpm = 0.0f;
+  candidateBpm = 0.0f;
+  consistentBeatIntervals = 0;
   heartRateValid = false;
 
   spo2Samples = 0;
@@ -1026,43 +1039,67 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
     return;
   }
 
-  // Heart-rate peak detection from the real IR AC waveform.
-  bool slopePositive = irAc > previousIrAc;
-  double peakThreshold = fmax(15.0, irEnvelope * 0.55);
-  // FIFO batches retain their 100 sps sample spacing despite host I2C delays.
+  // A bright optical level is not a beat. The live trace's ~62 AC on
+  // ~246k IR DC must not produce a numeric heart-rate estimate.
+  const double minPulseEnvelope =
+      fmax(OPTICAL_MIN_IR_ENVELOPE, irDc * OPTICAL_MIN_IR_AC_FRACTION);
+  if (irEnvelope < minPulseEnvelope) {
+    const bool hadValidEstimate = heartRateValid || spo2Valid;
+    invalidateVitalEstimates();
+    previousIrAc = irAc;
+    previousSlopePositive = false;
+    if (hadValidEstimate) sendBleEvent("VITALS:ACQUIRING");
+    return;
+  }
+
+  // Require three mutually consistent consecutive inter-beat intervals,
+  // not merely one interval between two arbitrary optical peaks.
+  const bool slopePositive = irAc > previousIrAc;
+  const double peakThreshold = fmax(15.0, irEnvelope * 0.55);
+  // FIFO batches preserve their 100 Hz sample index irrespective of host delays.
   const unsigned long now = opticalSampleTimeMs;
-  if (lastPeakAt != 0 && now - lastPeakAt > 2000) invalidateVitalEstimates();
+  if (lastPeakAt != 0 && now - lastPeakAt > 2000) {
+    const bool hadValidEstimate = heartRateValid || spo2Valid;
+    invalidateVitalEstimates();
+    if (hadValidEstimate) sendBleEvent("VITALS:ACQUIRING");
+  }
   if (irAc < 0.0) peakArmed = true;
 
-  if (peakArmed &&
-      previousSlopePositive &&
-      !slopePositive &&
+  if (peakArmed && previousSlopePositive && !slopePositive &&
       previousIrAc > peakThreshold) {
-    peakArmed = false; // At most one candidate per positive half-wave.
-
+    peakArmed = false; // A single positive half-wave yields at most one peak.
     if (lastPeakAt == 0) {
-      lastPeakAt = now;
+      lastPeakAt = now; // No heart-rate result from a single peak.
     } else {
       const unsigned long interval = now - lastPeakAt;
-
-      // A candidate above the supported 200 BPM ceiling is evidence that the
-      // current timing chain is invalid. Do not retain the older timestamp:
-      // doing so lets every second fast peak alias into a slower valid rate.
-      if (interval < 300) {
+      if (interval < 300 || interval > 2000) {
+        // Reject too-fast periods instead of aliasing skipped 240-BPM peaks.
+        const bool hadValidEstimate = heartRateValid || spo2Valid;
         invalidateVitalEstimates();
+        if (hadValidEstimate) sendBleEvent("VITALS:ACQUIRING");
       } else {
-        // 30-200 BPM sanity range for prototype filtering. Intervals above
-        // 2000 ms are already expired by the check immediately above.
-        float bpm = 60000.0f / (float)interval;
-
-        if (filteredBpm <= 0.0f) {
-          filteredBpm = bpm;
+        const float observedBpm = 60000.0f / (float)interval;
+        if (consistentBeatIntervals > 0 &&
+            fabsf(observedBpm - candidateBpm) >
+                candidateBpm * HEART_MAX_BEAT_DEVIATION) {
+          const bool hadValidEstimate = heartRateValid || spo2Valid;
+          heartRateValid = false;
+          spo2Valid = false;
+          consistentBeatIntervals = 1;
+          candidateBpm = observedBpm;
+          filteredBpm = 0.0f;
+          if (hadValidEstimate) sendBleEvent("VITALS:ACQUIRING");
         } else {
-          filteredBpm = 0.75f * filteredBpm + 0.25f * bpm;
+          candidateBpm = consistentBeatIntervals == 0 ? observedBpm :
+              0.75f * candidateBpm + 0.25f * observedBpm;
+          if (consistentBeatIntervals < HEART_MIN_CONSISTENT_INTERVALS) {
+            ++consistentBeatIntervals;
+          }
         }
-
-        heartRateValid = filteredBpm >= 30.0f && filteredBpm <= 200.0f;
         lastPeakAt = now;
+        heartRateValid = consistentBeatIntervals >= HEART_MIN_CONSISTENT_INTERVALS &&
+            candidateBpm >= 30.0f && candidateBpm <= 200.0f;
+        if (heartRateValid) filteredBpm = candidateBpm;
       }
     }
   }
@@ -1288,6 +1325,7 @@ void setup() {
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
   Serial.println("[FIRMWARE] shared-bus-diagnostic-v13-20261010");
+  Serial.println("[ALGORITHM] fall-pulse-confidence-v16-20261010");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);

@@ -176,6 +176,33 @@ int main(int argc, char** argv) {
       for (int i = 0; i < 34; ++i) accel(0, 0, 0x10);
       require(Serial.output.find("[EVENT] FALL_DETECTED") != std::string::npos,
               "a coherent single-axis drop must issue FALL_DETECTED");
+    } else if (name == "mpu_controlled_short_2g_drop" ||
+               name == "mpu_one_low_g_sample_rejected" ||
+               name == "mpu_postimpact_not_stable_rejected") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68), "MPU6500 must be initialized");
+      auto motion = [](uint8_t x, uint8_t y, uint8_t z) {
+        Wire.mpuRegs[0x3B] = x; Wire.mpuRegs[0x3D] = y; Wire.mpuRegs[0x3F] = z;
+        delay(21); updateMpuFallDetection();
+      };
+      // A short fall produces 2 low-g samples (42ms), then 2.0g on one axis.
+      motion(0, 0, 0);
+      if (name != "mpu_one_low_g_sample_rejected") motion(0, 0, 0);
+      motion(0x20, 0, 0);
+      // The last phase must be repeated real accelerometer readings, not
+      // a single near-1g sample followed by a blind delay.
+      for (int i = 0; i < 34; ++i) {
+        motion(0, 0, name == "mpu_postimpact_not_stable_rejected" ? 0x18 : 0x10);
+      }
+      const bool expected = name == "mpu_controlled_short_2g_drop";
+      const bool emitted = Serial.output.find("[EVENT] FALL_DETECTED") != std::string::npos;
+      require(emitted == expected, "fall output must match controlled short drop evidence");
+      if (expected) {
+        require(Serial.output.find("[FALL] LOW_G_ENTER") != std::string::npos &&
+                Serial.output.find("[FALL] IMPACT") != std::string::npos &&
+                Serial.output.find("[FALL] CONFIRMED") != std::string::npos,
+                "serial log must expose exactly which fall stages were observed");
+      }
     } else if (name == "mpu_first_fall_after_boot") {
       Wire.enableMpu(0x70);
       require(initializeMpuAt(0x68), "MPU must initialize");

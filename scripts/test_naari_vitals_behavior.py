@@ -8,6 +8,8 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 CASES = [
     'clean_pulse', 'low_amplitude_pulse', 'weak_contact_noise', 'buffered_pulse', 'too_fast_pulse',
+    'early_bpm_is_not_valid', 'bright_flat_ripple_rejected',
+    'stable_75_after_60_cadence_change', 'irregular_transients_not_valid',
     'quiet_no_finger', 'finger_transition_events',
     'dark', 'flat_light', 'light_ramp',
     'finger_removed', 'clipped_100', 'clipped_102', 'beat_expired', 'samples_expired',

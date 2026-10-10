@@ -2,6 +2,8 @@
 
 This is the authoritative, GitHub-rendered proof dossier for NAARI KAVACH. **All original assurance notes are retained below.**
 
+**v16 additional mathematical obligations:** [C01–C08 optical confidence constraints](PULSE_CONFIDENCE_C01_C08.md), with [executable Z3 model](prove_pulse_confidence.py). These augment (but do not modify or replace) the original 24 checked properties. They are integer-scaled abstract gate checks and do not establish medical heart-rate accuracy.
+
 **Start with the complete proof statements:** [exact P01–P12 and R01–R12 LaTeX theorem ledger](EXACT_THEOREMS.md). The 24 numbered SMT queries include **18 UNSAT safety/refutation checks and 6 SAT witnesses**; they do not constitute whole-device formal verification.
 
 For the separate abstract counter induction see [SOS-S1 and SOS-S2](SOS_COUNTER_INDUCTION.md). [Methodology, proof obligations, toolchain and limits](PROOF_SCOPE_AND_REPRODUCTION.md) explains precisely what GitHub/Z3 proved and what remains a physical hardware acceptance task.
