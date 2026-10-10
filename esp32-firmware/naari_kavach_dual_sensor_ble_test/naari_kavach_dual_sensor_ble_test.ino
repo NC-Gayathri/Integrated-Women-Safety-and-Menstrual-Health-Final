@@ -520,7 +520,7 @@ void updateMpuFallDetection() {
         break;
       }
 
-      if (magnitude > 0.75f && magnitude < 1.35f) {
+      if (magnitude > 0.80f && magnitude < 1.30f) {
         if (stationaryStartedAt == 0) stationaryStartedAt = now;
         if (now - stationaryStartedAt >= FALL_STATIONARY_MIN_MS) {
           lastFallTriggeredAt = now;
