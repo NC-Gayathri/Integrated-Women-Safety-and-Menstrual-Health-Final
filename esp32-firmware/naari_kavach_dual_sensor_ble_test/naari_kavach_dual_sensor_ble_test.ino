@@ -81,7 +81,8 @@ bool oldDeviceConnected = false;
 #define BUTTON_TRIPLE_CLICK_WINDOW_MS 1800
 #define BUTTON_DEBOUNCE_MS 50
 #define FALL_COOLDOWN_MS 25000
-#define FALL_FREE_FALL_MIN_MS 60
+// Keep a multi-sample low-g interval but detect shorter controlled drops.
+#define FALL_FREE_FALL_MIN_MS 40
 #define FALL_FREE_FALL_MAX_MS 600
 #define FALL_POST_IMPACT_TIMEOUT_MS 2000
 #define FALL_STATIONARY_MIN_MS 600
@@ -102,6 +103,10 @@ bool oldDeviceConnected = false;
 // (RED ~= 10k, IR ~= 20k) while rejecting the physical 3-5k weak-contact region.
 #define OPTICAL_VITAL_MIN_RED_DC 5000.0
 #define OPTICAL_VITAL_MIN_IR_DC 10000.0
+#define OPTICAL_MIN_IR_ENVELOPE 10.0
+#define OPTICAL_MIN_IR_AC_FRACTION 0.0004
+#define HEART_MIN_CONSISTENT_INTERVALS 3
+#define HEART_MAX_BEAT_DEVIATION 0.18f
 #define SENSOR_STATUS_INTERVAL_MS 5000
 #define LED_PULSE_MS 180
 
@@ -480,24 +485,27 @@ void updateMpuFallDetection() {
 
   switch (fallState) {
     case FALL_IDLE:
-      if (magnitude < 0.50f) {
+      if (magnitude < 0.65f) {
         fallState = FALL_FREE_FALL;
         freeFallStartedAt = now;
+        Serial.printf("[FALL] LOW_G_ENTER g=%.2f; awaiting impact.\n", magnitude);
       }
       break;
 
     case FALL_FREE_FALL: {
       const unsigned long freeFallMs = now - freeFallStartedAt;
-      if (magnitude < 0.50f) {
+      if (magnitude < 0.65f) {
         if (freeFallMs > FALL_FREE_FALL_MAX_MS) {
           fallState = FALL_IDLE;
         }
       } else if (freeFallMs >= FALL_FREE_FALL_MIN_MS &&
                  freeFallMs <= FALL_FREE_FALL_MAX_MS &&
-                 magnitude > 2.50f) {
+                 magnitude > 1.80f) {
         fallState = FALL_IMPACT;
         impactStartedAt = now;
         stationaryStartedAt = 0;
+        Serial.printf("[FALL] IMPACT g=%.2f low_g_ms=%lu; awaiting post-impact stability.\n",
+                      magnitude, freeFallMs);
       } else {
         // A single low-g sample followed by ordinary handling is not a fall.
         fallState = FALL_IDLE;
@@ -512,11 +520,12 @@ void updateMpuFallDetection() {
         break;
       }
 
-      if (magnitude > 0.80f && magnitude < 1.30f) {
+      if (magnitude > 0.75f && magnitude < 1.35f) {
         if (stationaryStartedAt == 0) stationaryStartedAt = now;
         if (now - stationaryStartedAt >= FALL_STATIONARY_MIN_MS) {
           lastFallTriggeredAt = now;
           hasFallTriggered = true;
+          Serial.println("[FALL] CONFIRMED low-g + impact + continuous near-1g samples.");
           sendBleEvent("FALL_DETECTED");
           pulseLed(500);
           fallState = FALL_IDLE;
@@ -1288,6 +1297,7 @@ void setup() {
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
   Serial.println("[FIRMWARE] shared-bus-diagnostic-v13-20261010");
+  Serial.println("[ALGORITHM] fall-pulse-confidence-v16-20261010");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
