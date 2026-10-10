@@ -5,6 +5,7 @@ No third-party dependencies; verifies documentation coverage and paths only,
 not source-to-SMT semantic equivalence.
 """
 from pathlib import Path
+import hashlib
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -37,6 +38,21 @@ assert len(doc_r) == 12 and set(doc_r) == expected_r, "An I2C theorem was omitte
 assert re.findall(r'\("P\d\d[^"\n]*",\s*"(unsat|sat)"', fall).count("sat") == 3
 assert re.findall(r'\("R\d\d[^"\n]*",\s*"(unsat|sat)"', i2c).count("sat") == 3
 assert "SOS-S1" in sos and "SOS-S2" in sos, "SOS induction absent"
+
+# Fail closed if a runner keeps its P/R label but silently changes its SMT
+# model/claim bytes. Git blob SHA-1 is a revision identity, not a security proof.
+source_locks = {
+    "prove_naari.py": "846bdd32f824c4f7a3755dc1c903c5c30028ddae",
+    "prove_i2c_recovery.py": "4e0a558d38f3ee4cf5126db21bdcafba4536b1e4",
+}
+for name, expected in source_locks.items():
+    blob = (DIR / name).read_bytes()
+    identity = hashlib.sha1(
+        b"blob " + str(len(blob)).encode("ascii") + b"\0" + blob
+    ).hexdigest()
+    assert identity == expected, f"Solver source changed without theorem review: {name}"
+    assert expected in theorems, f"Theorem ledger omits source lock for {name}"
+
 
 def check_fences(path):
     content = path.read_text(encoding="utf-8")

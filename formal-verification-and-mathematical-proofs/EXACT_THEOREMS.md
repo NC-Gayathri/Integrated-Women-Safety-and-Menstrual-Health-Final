@@ -329,3 +329,9 @@ The full case split and assumptions appear in [SOS_COUNTER_INDUCTION.md](SOS_COU
 They do not prove model equivalence to Arduino C++ or Android TypeScript, whole-system functional correctness, fair scheduling or liveness, measured voltage/clock rise times, absence of intermittent I²C dropouts, authenticity/delivery of BLE packets, calibrated HR/SpO₂ accuracy, safe physical fall classification, or end-to-end emergency reliability. Source-regex guards, real-sketch host test cases, successful board compilation and passing APK CI increase evidence, but **do not close these formal and physical gaps**.
 
 The original exact queries and their solver classifications remain individually traceable by the IDs above. We preserve **all P01–P12 and R01–R12 identifiers** and explicitly label SAT witnesses rather than silently treating them as universally proved theorems.
+
+## F. Proof source identity and anti-drift check
+
+The original P01–P12 solver script has **Git blob identity** `846bdd32f824c4f7a3755dc1c903c5c30028ddae`. The R01–R12 script, now with explicitly modeled post-restart state assignments for R09/R10, has Git blob identity `4e0a558d38f3ee4cf5126db21bdcafba4536b1e4`. The [automated documentation checker](check_proof_documentation.py) recalculates both Git content identities directly from their local bytes and requires these same identities to appear on this page.
+
+Consequently, merely reusing a theorem label while silently changing its solver source **fails CI**. An intentional future mathematical change must update the proof documentation, identify the new source bytes and rerun the solver and independent tests. These Git identities are **revision/drift guards**, not a proof of source/model equivalence or adversarial supply-chain authenticity.
