@@ -67,6 +67,7 @@ Run:
 ```sh
 python -m pip install z3-solver==5.1.0.0
 python verification/prove_naari.py
+python verification/prove_i2c_recovery.py
 python scripts/test_naari_optical_behavior.py
 python scripts/test_naari_vitals_behavior.py
 node scripts/test_naari_ble_vitals.cjs
@@ -81,8 +82,16 @@ The last command also requires project npm dependencies.
 3. **End-to-end notification authenticity/delivery:** exact-name/UUID BLE discovery and an exact packet parser do **not** authenticate the device. No cryptographic authenticated BLE pairing/protocol proof or physical phone-delivery proof is supplied.
 4. **Clinical correctness:** SpO2 is a non-calibrated signal approximation, no gold-standard accuracy trial exists; near-1g readings do not certify human immobility; missed impacts and false positives remain possible.
 5. **Time-domain assumptions:** modular subtraction is appropriate for short intervals when clocks make progress and the most recent event actually falls within the represented interval. A 32-bit clock repeats about every 49.71 days, so permanent duration claims require additional logic or a larger time domain.
-6. **Hardware:** user-provided v9 logs repeatedly show brownouts and both MAX30102 and MPU6500 I2C faults. Those remain **FAILED / UNMEASURED**, even if v12 SMT/CI checks pass.
+6. **Hardware:** user-provided v9 logs repeatedly show brownouts and both MAX30102 and MPU6500 I2C faults. Those remain **FAILED / UNMEASURED**, even if v13 SMT/CI checks pass.
 
-For hardware closure, physically measure regulated supply under load, verify bus electrical levels/pull-ups and breakout requirements, power down before rewiring, then perform separate ESP32-only, MPU-only and combined 5-minute error-free runs. Flash **v12** and prove the live serial boot marker. Verify three-click SOS and fall receipt on a real subscribed phone in a safe fixture with emergency action disabled. See the [physical acceptance ledger](../documentation/NAARI_KAVACH_FORMAL_AUDIT_2026-10-09.md).
+For hardware closure, physically measure regulated supply under load, verify bus electrical levels/pull-ups and breakout requirements, power down before rewiring, then perform separate ESP32-only, MPU-only and combined 5-minute error-free runs. Flash the current **v13** dual-sensor firmware and prove the live `[FIRMWARE] shared-bus-diagnostic-v13-20261010` marker. A pasted runtime excerpt without its boot marker does not establish that the current source was flashed. Verify three-click SOS and fall receipt on a real subscribed phone in a safe fixture with emergency action disabled. See the [physical acceptance ledger](../documentation/NAARI_KAVACH_FORMAL_AUDIT_2026-10-09.md).
 
 **Assurance label:** FORMAL SAFETY ABSTRACTION + EXECUTABLE REGRESSIONS; **NOT** END-TO-END VERIFIED HARDWARE/SOFTWARE/SAFETY CERTIFICATION.
+
+## 5. v13 dual-sensor bus fault mitigation (10 October 2026)
+
+The user's repeated optical FIFO metadata failure at address 0x57 register 0x04 together with MPU6500 I²C failures at address 0x68 is **physical evidence of recurring shared-bus communication loss**; neither repeated READY nor local SOS cancels that evidence. v13 records the final register-read TX/RX failure details and samples SDA/SCL at the fault. It correlates independent runtime sensor failure transitions within 3 seconds, and only when both sensors are unavailable does it consider one ESP32 Wire controller reinitialization. The attempt is rate-limited to no more than one per 10 seconds; if either line is LOW it skips controller reset rather than driving the held bus. It does not use GPIO bit-bang clock pulses or weaken brownout protection. All sensor state must be revalidated independently after a restart.
+
+The dedicated [shared-I²C QF_BV proof runner](prove_i2c_recovery.py) checks **12 additional model-level SMT queries**, including 32-bit millisecond wraparound. The actual sketch's host regression suite now includes correlated outage, held-low line, controller-begin failure, and one-sensor-isolated failure cases. These do not establish electrical line rise time, supply voltage, wire integrity, I²C driver completeness, or whole-program correctness.
+
+[Physical isolation and interpretation of new error logs](../documentation/NAARI_KAVACH_SHARED_BUS_DIAGNOSIS_V13.md) describes the required ESP32-only, sensor-only, dual-sensor and phone acceptance stages. **The physical/root-cause verification remains open** until those stages actually pass.
