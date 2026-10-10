@@ -1,3 +1,24 @@
+# Formal Verification and Mathematical Proofs
+
+This is the authoritative, GitHub-rendered proof dossier for NAARI KAVACH. **All original assurance notes are retained below.**
+
+**Start with the complete proof statements:** [exact P01–P12 and R01–R12 LaTeX theorem ledger](EXACT_THEOREMS.md). The 24 numbered SMT queries include **18 UNSAT safety/refutation checks and 6 SAT witnesses**; they do not constitute whole-device formal verification.
+
+For the separate abstract counter induction see [SOS-S1 and SOS-S2](SOS_COUNTER_INDUCTION.md). [Methodology, proof obligations, toolchain and limits](PROOF_SCOPE_AND_REPRODUCTION.md) explains precisely what GitHub/Z3 proved and what remains a physical hardware acceptance task.
+
+**Run the exact checks** from the repository root:
+
+```sh
+python -m pip install -r formal-verification-and-mathematical-proofs/requirements.txt
+python "formal-verification-and-mathematical-proofs/prove_naari.py"
+python "formal-verification-and-mathematical-proofs/prove_i2c_recovery.py"
+python "formal-verification-and-mathematical-proofs/check_proof_documentation.py"
+```
+
+---
+
+## Original mathematical-assurance narrative (preserved)
+
 # NAARI KAVACH v12 — reproducible mathematical assurance and limits
 
 **Date:** 10 October 2026. **Scope:** `formal-timing-v12-20261010` on the dual-sensor ESP32 test sketch. This document records *bounded formal evidence*, not certification that all firmware, Android, electronics, or medical functions are correct.
@@ -66,8 +87,8 @@ Run:
 
 ```sh
 python -m pip install z3-solver==5.1.0.0
-python verification/prove_naari.py
-python verification/prove_i2c_recovery.py
+python formal-verification-and-mathematical-proofs/prove_naari.py
+python formal-verification-and-mathematical-proofs/prove_i2c_recovery.py
 python scripts/test_naari_optical_behavior.py
 python scripts/test_naari_vitals_behavior.py
 node scripts/test_naari_ble_vitals.cjs

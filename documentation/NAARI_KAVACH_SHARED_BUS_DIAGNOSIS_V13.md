@@ -23,14 +23,14 @@ Important: `digitalRead` sampled at the point of failure is only an instant obse
 
 The production sketch is compiled against Arduino ESP32 3.3.12. The actual sketch is executed with a fake-I²C boundary, including cases where the common bus fails, one sensor alone fails, SDA is held low, controller `begin` fails, recovery is throttled and new samples are required. The optical and SOS regressions remain in the same suite.
 
-`verification/prove_i2c_recovery.py` uses Z3 `QF_BV` 32-bit unsigned millisecond arithmetic to check 12 guard properties, including no restart with one sensor available, no restart from a single fault, no restart on a held-low line, 10-second rate limiting and wraparound. The existing 12 fall/SOS model queries remain in `verification/prove_naari.py`. `unsat` checks establish **guard logic within the stated abstract model**; they are **not** whole-program model checking. The source-drift checks reduce accidental divergence but are not a proof of model equivalence.
+`formal-verification-and-mathematical-proofs/prove_i2c_recovery.py` uses Z3 `QF_BV` 32-bit unsigned millisecond arithmetic to check 12 guard properties, including no restart with one sensor available, no restart from a single fault, no restart on a held-low line, 10-second rate limiting and wraparound. The existing 12 fall/SOS model queries remain in `formal-verification-and-mathematical-proofs/prove_naari.py`. `unsat` checks establish **guard logic within the stated abstract model**; they are **not** whole-program model checking. The source-drift checks reduce accidental divergence but are not a proof of model equivalence.
 
 Commands:
 
 ```shell
 python3 -m pip install z3-solver==5.1.0.0
-python3 verification/prove_naari.py
-python3 verification/prove_i2c_recovery.py
+python3 formal-verification-and-mathematical-proofs/prove_naari.py
+python3 formal-verification-and-mathematical-proofs/prove_i2c_recovery.py
 python3 scripts/test_naari_optical_behavior.py
 python3 scripts/test_naari_vitals_behavior.py
 ```
@@ -62,3 +62,5 @@ Only work with power removed when changing physical connections. **Do not short,
 **Safety verdict:** SOFTWARE MITIGATION AND REPRODUCIBLE ABSTRACT PROOFS, physical shared-bus/root-cause **OPEN** until a real v13 flash and measurement-backed acceptance run. No software-only formal theorem can imply that a disconnected board remains powered or electrically reliable.
 
 Primary hardware references: [NXP UM10204 (I²C bus clear)](https://community.nxp.com/pwmxy87654/attachments/pwmxy87654/nxp-designs/931/1/UM10204.pdf), [Espressif Arduino Wire](https://github.com/espressif/arduino-esp32/blob/master/libraries/Wire/src/Wire.cpp), [Analog Devices MAX30102](https://www.analog.com/en/products/max30102.html).
+
+**Mathematical theorem index:** [GitHub-rendered P01–P12, R01–R12](../formal-verification-and-mathematical-proofs/EXACT_THEOREMS.md). These are model properties; physical electrical stability remains unproved.
