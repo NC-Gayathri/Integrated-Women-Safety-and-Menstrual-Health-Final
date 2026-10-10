@@ -11,7 +11,7 @@ from the repository's current default branch, `master`.
 The current Serial boot marker is:
 
 ```text
-[FIRMWARE] formal-timing-v12-20261010
+[FIRMWARE] shared-bus-diagnostic-v13-20261010
 ```
 
 Idle optical reporting is event-driven in v9: with no finger present the firmware keeps sampling for health/recovery but does not print periodic LOW_LIGHT/NO_VALID_READING lines. Finger placement/removal, numeric vitals, SOS/fall, BLE transitions, and genuine sensor faults remain visible.
@@ -40,7 +40,7 @@ The repository also contains older or purpose-specific firmware variants. They a
 - **`esp32_firmware/esp32_firmware.ino`** — legacy BLE GATT firmware.
 - diagnostic/scanner sketches — intentionally narrow hardware-diagnostic programs.
 
-Do not flash a legacy binary when validating `formal-timing-v12-20261010`.
+Do not flash a legacy binary when validating `shared-bus-diagnostic-v13-20261010`.
 
 ---
 
