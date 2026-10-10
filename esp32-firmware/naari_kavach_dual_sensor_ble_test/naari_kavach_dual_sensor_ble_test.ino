@@ -91,6 +91,8 @@ bool oldDeviceConnected = false;
 #define OPTICAL_RESET_TIMEOUT_MS 150
 #define OPTICAL_RESET_POLL_MS 5
 #define MPU_RETRY_INTERVAL_MS 2000
+#define SHARED_I2C_FAULT_WINDOW_MS 3000
+#define SHARED_I2C_RESTART_INTERVAL_MS 10000
 #define VITALS_REPORT_INTERVAL_MS 1000
 #define OPTICAL_SAMPLE_PERIOD_MS 10 // Both verified configurations: 100 samples/s.
 #define OPTICAL_SAMPLE_MAX_AGE_MS 500
@@ -157,6 +159,7 @@ void sendBleEvent(const String& payload) {
 // -----------------------------------------------------------------------------
 // Explicit declaration also keeps SOS servicing available inside I2C helpers.
 void updateButtonState();
+void noteSensorTransportFault(bool optical);
 
 bool probeAddress(uint8_t addr) {
   for (uint8_t attempt = 0; attempt < I2C_TRANSACTION_ATTEMPTS; ++attempt) {
@@ -171,6 +174,8 @@ bool probeAddress(uint8_t addr) {
 }
 
 bool readRegister8(uint8_t addr, uint8_t reg, uint8_t& value) {
+  uint8_t lastTxError = 0;
+  int lastReceived = -1;
   for (uint8_t attempt = 0; attempt < I2C_TRANSACTION_ATTEMPTS; ++attempt) {
     updateButtonState();
     Wire.beginTransmission(addr);
@@ -181,9 +186,12 @@ bool readRegister8(uint8_t addr, uint8_t reg, uint8_t& value) {
     // Retry the entire failed read with a STOP, including deferred RX failures.
     uint8_t txError = attempt == 0 ? Wire.endTransmission(false) :
                                     Wire.endTransmission(true);
+    lastTxError = txError;
+    lastReceived = -1;
     updateButtonState();
     if (txError == 0) {
       int received = Wire.requestFrom((int)addr, 1, (int)true);
+      lastReceived = received;
       updateButtonState();
       if (received == 1) {
         value = Wire.read();
@@ -193,7 +201,11 @@ bool readRegister8(uint8_t addr, uint8_t reg, uint8_t& value) {
     }
     delay(1);
   }
-  Serial.printf("[I2C] Read failed addr=0x%02X reg=0x%02X.\n", addr, reg);
+  // Capture transport evidence instead of reducing every fault to an address.
+  // Both high means idle lines; a low line points to a stuck wire/device.
+  Serial.printf("[I2C] Read failed addr=0x%02X reg=0x%02X tx=%u rx=%d SDA=%d SCL=%d.\n",
+                addr, reg, lastTxError, lastReceived,
+                digitalRead(I2C_SDA), digitalRead(I2C_SCL));
   return false;
 }
 
@@ -379,6 +391,7 @@ bool initializeMpuAt(uint8_t addr) {
   mpuWhoAmI = whoAmI;
   mpuReady = true;
   mpuConsecutiveErrors = 0;
+  mpuFaultObserved = false;
   fallState = FALL_IDLE;
   stationaryStartedAt = 0;
 
@@ -426,6 +439,7 @@ void updateMpuFallDetection() {
       lastMpuRetry = millis();
       Serial.printf("[MPU] %s I2C failures; sensor marked unavailable.\n", failedChip);
       sendBleEvent(String("SENSOR:") + failedChip + ":I2C_ERROR");
+      noteSensorTransportFault(false);
     }
     return;
   }
@@ -560,6 +574,14 @@ unsigned long opticalSampleTimeMs = 0;
 unsigned long opticalSampleCount = 0;
 uint16_t opticalSettlingSamples = 0;
 
+// Correlate *separate sensor fault transitions*, never ordinary retries.
+// A controller restart is an attempted software recovery, not a claim that
+// the common power rail or wiring is healthy.
+bool opticalFaultObserved = false, mpuFaultObserved = false;
+unsigned long opticalFaultAt = 0, mpuFaultAt = 0;
+bool sharedI2cRestartAttempted = false;
+unsigned long lastSharedI2cRestartAt = 0;
+
 const char* opticalChipName() {
   switch (opticalChip) {
     case OPTICAL_MAX30100: return "MAX30100";
@@ -597,6 +619,61 @@ void resetVitalsState() {
   lastRedRaw = lastIrRaw = 0;
   opticalSampleTimeMs = opticalSampleCount = 0;
   opticalSettlingSamples = 0;
+}
+
+void noteSensorTransportFault(bool optical) {
+  const unsigned long now = millis();
+  if (optical) {
+    opticalFaultObserved = true;
+    opticalFaultAt = now;
+  } else {
+    mpuFaultObserved = true;
+    mpuFaultAt = now;
+  }
+
+  if (!opticalFaultObserved || !mpuFaultObserved ||
+      opticalReady || mpuReady ||
+      (unsigned long)(now - (optical ? mpuFaultAt : opticalFaultAt)) >
+          SHARED_I2C_FAULT_WINDOW_MS ||
+      (sharedI2cRestartAttempted &&
+       (unsigned long)(now - lastSharedI2cRestartAt) <
+           SHARED_I2C_RESTART_INTERVAL_MS)) {
+    return;
+  }
+
+  // Never drive or clock a potentially held-low bus from this test firmware.
+  // If a line is held LOW, NXP's bus-clear procedure requires carefully
+  // verified electrical preconditions; power/reset the faulty board offline.
+  sharedI2cRestartAttempted = true;
+  lastSharedI2cRestartAt = now;
+  const int sda = digitalRead(I2C_SDA);
+  const int scl = digitalRead(I2C_SCL);
+  Serial.printf("[BUS] SHARED_I2C_FAULT SDA=%d SCL=%d at=%lu.\n",
+                sda, scl, now);
+  if (sda == LOW || scl == LOW) {
+    Serial.println("[BUS] LINE_HELD_LOW; no software bus clocks; inspect power and wiring.");
+    return;
+  }
+
+  // The two faults were observed on independent addresses. Only the I2C
+  // controller is reset here. All sensor data remains invalid until each
+  // physical device passes identification + configuration readback again.
+  (void)Wire.end();
+  const bool began = Wire.begin(I2C_SDA, I2C_SCL);
+  if (began) {
+    Wire.setClock(I2C_CLOCK_HZ);
+    Wire.setTimeOut(I2C_TIMEOUT_MS);
+  }
+  mpuReady = false;
+  opticalReady = false;
+  fallState = FALL_IDLE;
+  stationaryStartedAt = 0;
+  mpuConsecutiveErrors = 0;
+  resetVitalsState();
+  lastMpuRetry = millis();
+  lastOpticalRetry = millis();
+  Serial.printf("[BUS] CONTROLLER_REINIT=%s; both sensors NOT_READY until verified.\n",
+                began ? "OK" : "FAILED");
 }
 
 bool configureMax30100() {
@@ -758,6 +835,7 @@ bool identifyAndConfigureOptical() {
   }
 
   opticalReady = true;
+  opticalFaultObserved = false;
   lastOpticalSampleAt = millis();
   resetVitalsState();
 
@@ -775,6 +853,7 @@ void markOpticalI2cFailure(const char* operation) {
   Serial.printf("[OPTICAL] %s failed; discarding samples; retry in %lu ms.\n",
                 operation, (unsigned long)OPTICAL_RETRY_INTERVAL_MS);
   sendBleEvent(String("SENSOR:") + opticalChipName() + ":I2C_ERROR");
+  noteSensorTransportFault(true);
 }
 
 bool readOpticalFifo(uint8_t reg, uint8_t* buffer, uint8_t length) {
@@ -1208,7 +1287,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println(" NAARI KAVACH - DUAL SENSOR BLE TEST");
   Serial.println("=======================================================");
-  Serial.println("[FIRMWARE] formal-timing-v12-20261010");
+  Serial.println("[FIRMWARE] shared-bus-diagnostic-v13-20261010");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
