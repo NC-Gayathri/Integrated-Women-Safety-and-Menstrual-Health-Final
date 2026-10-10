@@ -571,6 +571,8 @@ double previousIrAc = 0.0;
 bool previousSlopePositive = false;
 unsigned long lastPeakAt = 0;
 float filteredBpm = 0.0f;
+float candidateBpm = 0.0f;
+uint8_t consistentBeatIntervals = 0;
 bool heartRateValid = false;
 
 static const int SPO2_WINDOW = 100;
@@ -604,6 +606,8 @@ void invalidateVitalEstimates() {
   lastPeakAt = 0;
   peakArmed = false;
   filteredBpm = 0.0f;
+  candidateBpm = 0.0f;
+  consistentBeatIntervals = 0;
   heartRateValid = false;
 
   spo2Samples = 0;
@@ -1035,43 +1039,67 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
     return;
   }
 
-  // Heart-rate peak detection from the real IR AC waveform.
-  bool slopePositive = irAc > previousIrAc;
-  double peakThreshold = fmax(15.0, irEnvelope * 0.55);
-  // FIFO batches retain their 100 sps sample spacing despite host I2C delays.
+  // A bright optical level is not a beat. The live trace's ~62 AC on
+  // ~246k IR DC must not produce a numeric heart-rate estimate.
+  const double minPulseEnvelope =
+      fmax(OPTICAL_MIN_IR_ENVELOPE, irDc * OPTICAL_MIN_IR_AC_FRACTION);
+  if (irEnvelope < minPulseEnvelope) {
+    const bool hadValidEstimate = heartRateValid || spo2Valid;
+    invalidateVitalEstimates();
+    previousIrAc = irAc;
+    previousSlopePositive = false;
+    if (hadValidEstimate) sendBleEvent("VITALS:ACQUIRING");
+    return;
+  }
+
+  // Require three mutually consistent consecutive inter-beat intervals,
+  // not merely one interval between two arbitrary optical peaks.
+  const bool slopePositive = irAc > previousIrAc;
+  const double peakThreshold = fmax(15.0, irEnvelope * 0.55);
+  // FIFO batches preserve their 100 Hz sample index irrespective of host delays.
   const unsigned long now = opticalSampleTimeMs;
-  if (lastPeakAt != 0 && now - lastPeakAt > 2000) invalidateVitalEstimates();
+  if (lastPeakAt != 0 && now - lastPeakAt > 2000) {
+    const bool hadValidEstimate = heartRateValid || spo2Valid;
+    invalidateVitalEstimates();
+    if (hadValidEstimate) sendBleEvent("VITALS:ACQUIRING");
+  }
   if (irAc < 0.0) peakArmed = true;
 
-  if (peakArmed &&
-      previousSlopePositive &&
-      !slopePositive &&
+  if (peakArmed && previousSlopePositive && !slopePositive &&
       previousIrAc > peakThreshold) {
-    peakArmed = false; // At most one candidate per positive half-wave.
-
+    peakArmed = false; // A single positive half-wave yields at most one peak.
     if (lastPeakAt == 0) {
-      lastPeakAt = now;
+      lastPeakAt = now; // No heart-rate result from a single peak.
     } else {
       const unsigned long interval = now - lastPeakAt;
-
-      // A candidate above the supported 200 BPM ceiling is evidence that the
-      // current timing chain is invalid. Do not retain the older timestamp:
-      // doing so lets every second fast peak alias into a slower valid rate.
-      if (interval < 300) {
+      if (interval < 300 || interval > 2000) {
+        // Reject too-fast periods instead of aliasing skipped 240-BPM peaks.
+        const bool hadValidEstimate = heartRateValid || spo2Valid;
         invalidateVitalEstimates();
+        if (hadValidEstimate) sendBleEvent("VITALS:ACQUIRING");
       } else {
-        // 30-200 BPM sanity range for prototype filtering. Intervals above
-        // 2000 ms are already expired by the check immediately above.
-        float bpm = 60000.0f / (float)interval;
-
-        if (filteredBpm <= 0.0f) {
-          filteredBpm = bpm;
+        const float observedBpm = 60000.0f / (float)interval;
+        if (consistentBeatIntervals > 0 &&
+            fabsf(observedBpm - candidateBpm) >
+                candidateBpm * HEART_MAX_BEAT_DEVIATION) {
+          const bool hadValidEstimate = heartRateValid || spo2Valid;
+          heartRateValid = false;
+          spo2Valid = false;
+          consistentBeatIntervals = 1;
+          candidateBpm = observedBpm;
+          filteredBpm = 0.0f;
+          if (hadValidEstimate) sendBleEvent("VITALS:ACQUIRING");
         } else {
-          filteredBpm = 0.75f * filteredBpm + 0.25f * bpm;
+          candidateBpm = consistentBeatIntervals == 0 ? observedBpm :
+              0.75f * candidateBpm + 0.25f * observedBpm;
+          if (consistentBeatIntervals < HEART_MIN_CONSISTENT_INTERVALS) {
+            ++consistentBeatIntervals;
+          }
         }
-
-        heartRateValid = filteredBpm >= 30.0f && filteredBpm <= 200.0f;
         lastPeakAt = now;
+        heartRateValid = consistentBeatIntervals >= HEART_MIN_CONSISTENT_INTERVALS &&
+            candidateBpm >= 30.0f && candidateBpm <= 200.0f;
+        if (heartRateValid) filteredBpm = candidateBpm;
       }
     }
   }
