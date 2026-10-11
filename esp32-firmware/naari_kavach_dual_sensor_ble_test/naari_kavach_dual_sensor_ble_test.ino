@@ -743,6 +743,9 @@ void maintainI2cController() {
   lastSharedI2cRestartAt = now;
   ++sharedI2cRestartCount;
   updateButtonState();
+  // A previous successful begin followed by failed setClock may still hold
+  // an allocated ESP32 Wire driver. Release it before the bounded restore.
+  (void)Wire.end();
   const bool began = Wire.begin(I2C_SDA, I2C_SCL);
   const bool configured = began && Wire.setClock(I2C_CLOCK_HZ);
   if (configured) Wire.setTimeOut(I2C_TIMEOUT_MS);
