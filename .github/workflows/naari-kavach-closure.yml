@@ -92,6 +92,7 @@ jobs:
           grep -Fq '[FIRMWARE] shared-bus-diagnostic-v13-20261010' "$F"
           grep -Fq '[ALGORITHM] fall-pulse-confidence-v16-20261010' "$F"
           grep -Fq '[BUS_POLICY] failclosed-recurrence-v17-20261011' "$F"
+          grep -Fq '[FIFO_POLICY] optical-poll-vitals-v18-20261011' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"
