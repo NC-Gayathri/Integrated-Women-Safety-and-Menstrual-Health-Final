@@ -412,6 +412,70 @@ int main(int argc, char** argv) {
               "both sensors may return READY only after real re-identification and readback");
       require(!heartRateValid && !spo2Valid && !fingerPresent,
               "no stale clinical numbers after successful revalidation");
+    } else if (name == "failed_controller_blocks_all_sensor_io" ||
+               name == "failed_controller_clock_config_blocks_io") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68) && identifyAndConfigureOptical(),
+              "initial sensors must be configured");
+      delay(5000);
+      Wire.failReads = true;
+      Wire.failureMs = 0;
+      if (name == "failed_controller_blocks_all_sensor_io") Wire.beginOk = false;
+      else Wire.clockOk = false;
+      for (int i = 0; i < 4; ++i) { delay(21); loop(); }
+      require(!i2cControllerOperational && !opticalReady && !mpuReady,
+              "a controller that failed begin/clock setup must fail closed");
+      const auto priorTraffic = Wire.transactions;
+      Wire.failReads = false;
+      for (int i = 0; i < 900; ++i) { delay(1); loop(); }
+      require(Wire.transactions == priorTraffic,
+              "even physically responsive mock devices must never be contacted without a controller");
+      require(!opticalReady && !mpuReady &&
+              Serial.output.find("[EVENT] FALL_DETECTED") == std::string::npos,
+              "an unusable controller cannot manufacture sensor readiness or fall");
+      Wire.beginOk = true;
+      Wire.clockOk = true;
+      delay(SHARED_I2C_RESTART_INTERVAL_MS + 1);
+      loop();
+      require(i2cControllerOperational,
+              "restoring Wire.begin AND setClock may clear the controller gate");
+      require(!opticalReady && !mpuReady,
+              "controller restore is not independent sensor revalidation");
+      delay(MPU_RETRY_INTERVAL_MS + 1);
+      loop();
+      require(opticalReady && mpuReady,
+              "independent sensor identification/readback needed after controller recovery");
+    } else if (name == "restart_budget_persistent_escalation") {
+      Wire.enableMpu(0x70);
+      require(initializeMpuAt(0x68) && identifyAndConfigureOptical(), "healthy initial identity");
+      delay(5000);
+      Wire.failureMs = 0;
+      opticalReady = false;
+      mpuReady = false;
+      heartRateValid = spo2Valid = fingerPresent = true;
+      noteSensorTransportFault(true); noteSensorTransportFault(false);
+      require(Wire.busRestarts == 1 && sharedI2cRestartCount == 1,
+              "first correlated bus fault restarts controller once");
+      require(!heartRateValid && !spo2Valid && !fingerPresent,
+              "first restart must invalidate all old vitals");
+      delay(SHARED_I2C_RESTART_INTERVAL_MS + 1);
+      noteSensorTransportFault(true); noteSensorTransportFault(false);
+      require(Wire.busRestarts == 2 && sharedI2cRestartCount == 2,
+              "second correlated fault consumes final controller restart");
+      delay(SHARED_I2C_RESTART_INTERVAL_MS + 1);
+      noteSensorTransportFault(true); noteSensorTransportFault(false);
+      require(Wire.busRestarts == 2 &&
+              Serial.output.find("PERSISTENT_I2C_FAULT") != std::string::npos,
+              "third recurrent fault must escalate instead of restarting");
+      const std::string previousLog = Serial.output;
+      noteSensorTransportFault(true); noteSensorTransportFault(false);
+      require(Serial.output == previousLog,
+              "hardware escalation should log only once per 60-second epoch");
+      const auto firstAt = sharedI2cWindowStartedAt;
+      testClock = firstAt + SHARED_I2C_RESTART_WINDOW_MS;
+      noteSensorTransportFault(true); noteSensorTransportFault(false);
+      require(Wire.busRestarts == 3 && sharedI2cRestartCount == 1,
+              "after the window a new bounded recovery epoch may begin");
     } else if (name == "shared_one_sensor_only_no_restart") {
       Wire.enableMpu(0x70);
       require(initializeMpuAt(0x68) && identifyAndConfigureOptical(),
