@@ -97,8 +97,10 @@ int main(int argc, char** argv) {
       }
       require(heartRateValid && !spo2Valid, "must retain only HR");
       Serial.output.clear();
-      report();
-      report();
+      for (int i = 0; i < 2; ++i) {
+        lastVitalsReport = millis() - VITALS_REPORT_INTERVAL_MS;
+        updateOpticalSensor(); // Retain both events; report() clears Serial.output.
+      }
       require(occurrences(Serial.output, "[EVENT] VITALS:ACQUIRING") == 1,
               "full-to-partial transition should clear stale SpO2 once, not on every HR update");
       require(occurrences(Serial.output, "[EVENT] HEART_RATE:") == 2,
