@@ -81,6 +81,47 @@ with tempfile.TemporaryDirectory(prefix='naari-cleanup-') as temp:
     attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
     assert attempt.returncode != 0, 'lookalike v17 branch must be rejected'
 
+    # v18 accidentally survived a prior green CI because the cleanup
+    # allowlist omitted its exact branch name. Exercise the real leased push.
+    v18 = 'fix/naari-optical-poll-and-vitals-events-v18'
+    v18_ref = f'refs/heads/{v18}'
+    git(work, 'push', 'origin', f'HEAD:{v18_ref}')
+    env['REPAIR_BRANCH'] = v18
+    env['REPAIR_HEAD'] = verified  # Old SHA must not delete updated work.
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode != 0, 'v18 stale SHA must never delete the current ref'
+    assert git(remote, 'rev-parse', v18_ref) == newer, 'v18 must survive stale lease'
+    env['REPAIR_HEAD'] = newer
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode == 0, attempt.stderr
+    assert not git(remote, 'for-each-ref', '--format=%(refname)', v18_ref)
+    print('PASS v18 exact head deleted only after SHA lease agrees')
+    git(work, 'push', 'origin', f'HEAD:{v18_ref}')
+    env['REPAIR_BRANCH'] = v18 + '-lookalike'
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode != 0, 'v18 lookalike must never be eligible'
+    assert git(remote, 'rev-parse', v18_ref) == newer, 'the real v18 ref must be preserved'
+    # Cleanup the fixture ref through a valid exact match.
+    env['REPAIR_BRANCH'] = v18
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode == 0, attempt.stderr
+
+    # The GitHub Actions verification must pin the merge, branch, PR, and master.
+    workflow = (ROOT / '.github/workflows/naari-kavach-closure.yml').read_text()
+    for required in (
+        "pull_number: 24",
+        "pr.merge_commit_sha !== expectedMergeCommit",
+        "pr.head.sha !== expectedHead",
+        "head.object.sha !== expectedHead",
+        "mergeContained.behind_by !== 0",
+        "Delete verified previously merged v18 head with atomic lease",
+        "Assert master is the only protected branch after cleanup",
+        "branches.length !== 1",
+        "branches[0].protected !== true",
+    ):
+        assert required in workflow, f'cleanup workflow missing guard: {required}'
+    print('PASS v18 historical PR verification and final sole-protected-master gate')
+
     env['REPAIR_BRANCH'] = 'fix/naari-formal-assurance-v12-extra'
     attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
     assert attempt.returncode != 0, 'lookalike v12 branch must not be allowlisted'
