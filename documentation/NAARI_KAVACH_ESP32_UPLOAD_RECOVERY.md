@@ -151,3 +151,7 @@ Repository CI can prove source-level contracts, host regressions and compilation
 - Espressif esptool troubleshooting — `No serial data received`, port, power, bootloader and lower-baud diagnostics.
 - Espressif ESP32 boot-mode selection — GPIO0 / BOOT and reset behaviour.
 - Espressif esptool basic commands — non-writing `read-mac` and flash operations.
+
+## v17 live binary acceptance (11 October 2026)
+
+The historical `[FIRMWARE] shared-bus-diagnostic-v13-20261010` marker is still emitted for legacy tracing, but the current **v17 required source/merged-image/live-serial marker** is `[BUS_POLICY] failclosed-recurrence-v17-20261011`. The `ble-bridge/flash_ble.ps1` helper must reject builds or boots lacking this new marker. A log without its fresh startup header does not establish that new controller-fault containment is flashed.
