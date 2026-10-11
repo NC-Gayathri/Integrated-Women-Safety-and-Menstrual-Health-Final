@@ -11,7 +11,7 @@ All timestamps are unsigned 32-bit values. Let $t$ be the current sample, $w$ th
 \Delta(t,u)&=(t-u)\bmod 2^{32},\\
 X&:=\neg H\lor\Delta(t,w)\ge60000,\\
 n_{\mathrm{eff}}&:=
-\begin{cases}0,&X,\\n,&\neg X,\end{cases}\\
+\begin{cases}0,&X,\\ n,&\neg X,\end{cases}\\
 C&:=\neg P\lor\Delta(t,\rho)\ge10000,\\
 F&:=F_O\land F_M\land\neg R_O\land\neg R_M,\\
 J&:=F\land C\land\neg D_S\land\neg D_C
