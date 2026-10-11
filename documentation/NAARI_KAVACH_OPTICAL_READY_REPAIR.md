@@ -150,3 +150,7 @@ I2C loss invalidates the candidate, and brownouts reset the controller.
 Run tests on a padded captive fixture with strain-relieved connections,
 not by dropping an exposed wired sensor/ESP32. The observed brownout and
 shared-bus I2C errors remain separate unresolved hardware failures.
+
+## v17 bus policy verification
+
+The existing `[FIRMWARE] shared-bus-diagnostic-v13-20261010` identity is retained, but **current** binary acceptance additionally requires `[BUS_POLICY] failclosed-recurrence-v17-20261011` from a real fresh serial boot. Optical `READY` without uninterrupted FIFO transport is not physical acceptance. See [v17 recurrent bus diagnosis](NAARI_KAVACH_V17_RECURRENCE_DIAGNOSIS.md).

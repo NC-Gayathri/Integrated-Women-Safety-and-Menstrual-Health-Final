@@ -20,6 +20,7 @@ required = {
     "prove_i2c_recovery.py", "requirements.txt", "check_proof_documentation.py",
     "validate_repository_math.py", "check_mathjax_render.cjs",
     "PULSE_CONFIDENCE_C01_C08.md", "prove_pulse_confidence.py",
+    "BUS_FAILCLOSED_B01_B10.md", "prove_bus_failclosed.py",
 }
 assert required <= {p.name for p in DIR.iterdir()}, "Missing proof artifact"
 
@@ -48,6 +49,16 @@ expected_c = {f"C{x:02d}" for x in range(1, 9)}
 documented_c = re.findall(r"^## (C[0-9][0-9]):", additional, re.MULTILINE)
 assert len(documented_c) == 8 and set(documented_c) == expected_c, "v16 theorem omitted/duplicated"
 assert all(x in additional_runner for x in expected_c), "v16 solver obligations omitted"
+
+# The new exact B01-B10 statements are added, never substituted for P/R/C.
+bus_doc = (DIR / "BUS_FAILCLOSED_B01_B10.md").read_text(encoding="utf-8")
+bus_runner = (DIR / "prove_bus_failclosed.py").read_text(encoding="utf-8")
+expected_b = {f"B{x:02d}" for x in range(1, 11)}
+bus_headers = re.findall(r"^## (B[0-9][0-9])\b", bus_doc, re.MULTILINE)
+assert len(bus_headers) == 10 and set(bus_headers) == expected_b, "v17 theorem lost/duplicated"
+assert all(f'\"{x} ' in bus_runner for x in expected_b), "v17 proof query omitted"
+assert bus_doc.count("```math") >= 11, "v17 GitHub math blocks absent"
+
 
 
 # Fail closed if a runner keeps its P/R label but silently changes its SMT
@@ -94,6 +105,7 @@ assert f"{FOLDER}/requirements.txt" in workflow, "CI dependency path not updated
 assert f"{FOLDER}/validate_repository_math.py" in workflow
 assert f"{FOLDER}/check_mathjax_render.cjs" in workflow
 assert f"{FOLDER}/prove_pulse_confidence.py" in workflow, "New HR SMT proof absent from CI"
+assert f"{FOLDER}/prove_bus_failclosed.py" in workflow, "New bus-controller SMT missing from CI"
 assert "mathjax-full@3.2.2" in workflow, "MathJax version not pinned"
 
 

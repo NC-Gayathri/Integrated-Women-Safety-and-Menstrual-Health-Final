@@ -28,6 +28,10 @@ assert match, 'firmware must expose a serial build marker'
 marker = match.group(1)
 assert marker == 'shared-bus-diagnostic-v13-20261010', f'unexpected current marker: {marker}'
 expected_line = f'[FIRMWARE] {marker}'
+policy_line = '[BUS_POLICY] failclosed-recurrence-v17-20261011'
+assert policy_line in firmware, 'current fail-closed controller policy must be in production sketch'
+assert policy_line in FLASH.read_text(encoding='utf-8'), 'flash helper must reject older firmware'
+
 
 for path in [README, RECOVERY, OPTICAL]:
     text = path.read_text(encoding='utf-8')

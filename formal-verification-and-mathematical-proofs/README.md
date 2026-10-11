@@ -1,6 +1,8 @@
 # Formal Verification and Mathematical Proofs
 
-This is the authoritative, GitHub-rendered proof dossier for NAARI KAVACH. **All original assurance notes are retained below.**
+This is the authoritative, GitHub-rendered proof dossier for NAARI KAVACH.
+
+**v17 bus fault-containment properties:** [B01–B10 exact GitHub LaTeX checks](BUS_FAILCLOSED_B01_B10.md), with [executable Z3 model](prove_bus_failclosed.py). These verify abstract controller fail-closed and reset-budget predicates; no electrical power or bus reliability is proved. **All original assurance notes are retained below.**
 
 **v16 additional mathematical obligations:** [C01–C08 optical confidence constraints](PULSE_CONFIDENCE_C01_C08.md), with [executable Z3 model](prove_pulse_confidence.py). These augment (but do not modify or replace) the original 24 checked properties. They are integer-scaled abstract gate checks and do not establish medical heart-rate accuracy.
 

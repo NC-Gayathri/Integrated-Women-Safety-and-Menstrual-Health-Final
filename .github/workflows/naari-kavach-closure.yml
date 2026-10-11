@@ -21,6 +21,7 @@ on:
       - "README.md"
       - "documentation/NAARI_KAVACH_SHARED_BUS_DIAGNOSIS_V13.md"
       - "documentation/NAARI_KAVACH_V16_FALL_PULSE_ACCEPTANCE.md"
+      - "documentation/NAARI_KAVACH_V17_RECURRENCE_DIAGNOSIS.md"
       - "tsconfig.naari-ci.json"
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
       - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
@@ -90,6 +91,7 @@ jobs:
           grep -Fq 'sendSensorHealthSnapshot();' "$F"
           grep -Fq '[FIRMWARE] shared-bus-diagnostic-v13-20261010' "$F"
           grep -Fq '[ALGORITHM] fall-pulse-confidence-v16-20261010' "$F"
+          grep -Fq '[BUS_POLICY] failclosed-recurrence-v17-20261011' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"
@@ -131,6 +133,9 @@ jobs:
 
       - name: Prove 8 additional v16 multi-beat pulse confidence properties
         run: python "formal-verification-and-mathematical-proofs/prove_pulse_confidence.py"
+
+      - name: Prove v17 failed-controller I2C exclusion and bounded restart escalation
+        run: python "formal-verification-and-mathematical-proofs/prove_bus_failclosed.py"
 
       - name: Prove complete 24-property GitHub LaTeX dossier and path integrity
         run: python "formal-verification-and-mathematical-proofs/check_proof_documentation.py"
@@ -292,7 +297,8 @@ jobs:
               pr.head.repo?.full_name === `${owner}/${repo}` &&
               (pr.head.ref.startsWith('fix/naari-kavach-') ||
                pr.head.ref === 'fix/naari-formal-assurance-v12' ||
-               pr.head.ref === 'fix/naari-github-math-render-v15')
+               pr.head.ref === 'fix/naari-github-math-render-v15' ||
+               pr.head.ref === 'fix/naari-recurrent-i2c-failclosed-v17')
             );
 
             if (candidates.length === 0) {

@@ -38,6 +38,9 @@ CASES = [
     'shared_controller_recovers', 'shared_held_sda_does_not_clock',
     'shared_held_scl_does_not_clock',
     'shared_restart_failure_safe', 'shared_one_sensor_only_no_restart',
+    'failed_controller_blocks_all_sensor_io',
+    'failed_controller_clock_config_blocks_io',
+    'restart_budget_persistent_escalation',
 ]
 with tempfile.TemporaryDirectory(prefix='naari-sensors-') as temporary:
     executable = str(Path(temporary) / 'readiness-test')

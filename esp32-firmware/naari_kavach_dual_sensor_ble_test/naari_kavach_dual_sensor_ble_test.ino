@@ -94,6 +94,8 @@ bool oldDeviceConnected = false;
 #define MPU_RETRY_INTERVAL_MS 2000
 #define SHARED_I2C_FAULT_WINDOW_MS 3000
 #define SHARED_I2C_RESTART_INTERVAL_MS 10000
+#define SHARED_I2C_RESTART_WINDOW_MS 60000
+#define SHARED_I2C_RESTART_BUDGET 2
 #define VITALS_REPORT_INTERVAL_MS 1000
 #define OPTICAL_SAMPLE_PERIOD_MS 10 // Both verified configurations: 100 samples/s.
 #define OPTICAL_SAMPLE_MAX_AGE_MS 500
@@ -350,6 +352,11 @@ bool opticalFaultObserved = false, mpuFaultObserved = false;
 unsigned long opticalFaultAt = 0, mpuFaultAt = 0;
 bool sharedI2cRestartAttempted = false;
 unsigned long lastSharedI2cRestartAt = 0;
+bool i2cControllerOperational = true;
+bool sharedI2cWindowActive = false;
+unsigned long sharedI2cWindowStartedAt = 0;
+uint8_t sharedI2cRestartCount = 0;
+bool sharedI2cEscalated = false;
 
 bool initializeMpuAt(uint8_t addr) {
   // READY is fail-closed: every attempt must re-prove identity and configuration.
@@ -425,6 +432,7 @@ void tryInitializeMpu() {
 }
 
 void updateMpuFallDetection() {
+  if (!i2cControllerOperational) return; // A failed Wire.begin is NOT a usable bus.
   unsigned long now = millis();
 
   if (!mpuReady) {
@@ -668,15 +676,30 @@ void noteSensorTransportFault(bool optical) {
     return;
   }
 
-  // The two faults were observed on independent addresses. Only the I2C
-  // controller is reset here. All sensor data remains invalid until each
-  // physical device passes identification + configuration readback again.
+  if (!sharedI2cWindowActive ||
+      (unsigned long)(now - sharedI2cWindowStartedAt) >=
+          SHARED_I2C_RESTART_WINDOW_MS) {
+    sharedI2cWindowActive = true;
+    sharedI2cWindowStartedAt = now;
+    sharedI2cRestartCount = 0;
+    sharedI2cEscalated = false;
+  }
+  if (sharedI2cRestartCount >= SHARED_I2C_RESTART_BUDGET) {
+    if (!sharedI2cEscalated) {
+      sharedI2cEscalated = true;
+      Serial.println("[BUS] PERSISTENT_I2C_FAULT; controller restart budget exhausted; inspect physical bus/power.");
+    }
+    return;
+  }
+
+  // A peripheral restart is an attempted mitigation, not evidence of physical
+  // recovery. After two failures in 60s, stop churning controller state.
+  ++sharedI2cRestartCount;
   (void)Wire.end();
   const bool began = Wire.begin(I2C_SDA, I2C_SCL);
-  if (began) {
-    Wire.setClock(I2C_CLOCK_HZ);
-    Wire.setTimeOut(I2C_TIMEOUT_MS);
-  }
+  const bool configured = began && Wire.setClock(I2C_CLOCK_HZ);
+  if (configured) Wire.setTimeOut(I2C_TIMEOUT_MS);
+  i2cControllerOperational = configured;
   mpuReady = false;
   opticalReady = false;
   fallState = FALL_IDLE;
@@ -685,8 +708,60 @@ void noteSensorTransportFault(bool optical) {
   resetVitalsState();
   lastMpuRetry = millis();
   lastOpticalRetry = millis();
-  Serial.printf("[BUS] CONTROLLER_REINIT=%s; both sensors NOT_READY until verified.\n",
-                began ? "OK" : "FAILED");
+  Serial.printf("[BUS] CONTROLLER_REINIT=%s attempt=%u/%u; both sensors NOT_READY until verified.\n",
+                configured ? "OK" : "FAILED",
+                (unsigned int)sharedI2cRestartCount,
+                (unsigned int)SHARED_I2C_RESTART_BUDGET);
+}
+
+// Only this path may restore a failed controller. No optical/MPU transfer is
+// permitted while i2cControllerOperational is false. The same 10s lease and
+// two-per-60s budget apply here; SOS continues regardless of this state.
+void maintainI2cController() {
+  if (i2cControllerOperational) return;
+  const unsigned long now = millis();
+  if (sharedI2cRestartAttempted &&
+      (unsigned long)(now - lastSharedI2cRestartAt) <
+          SHARED_I2C_RESTART_INTERVAL_MS) return;
+  if (digitalRead(I2C_SDA) == LOW || digitalRead(I2C_SCL) == LOW) return;
+  if (!sharedI2cWindowActive ||
+      (unsigned long)(now - sharedI2cWindowStartedAt) >=
+          SHARED_I2C_RESTART_WINDOW_MS) {
+    sharedI2cWindowActive = true;
+    sharedI2cWindowStartedAt = now;
+    sharedI2cRestartCount = 0;
+    sharedI2cEscalated = false;
+  }
+  if (sharedI2cRestartCount >= SHARED_I2C_RESTART_BUDGET) {
+    if (!sharedI2cEscalated) {
+      sharedI2cEscalated = true;
+      Serial.println("[BUS] PERSISTENT_I2C_FAULT; restoration budget exhausted; physical intervention required.");
+    }
+    return;
+  }
+  sharedI2cRestartAttempted = true;
+  lastSharedI2cRestartAt = now;
+  ++sharedI2cRestartCount;
+  updateButtonState();
+  // A previous successful begin followed by failed setClock may still hold
+  // an allocated ESP32 Wire driver. Release it before the bounded restore.
+  (void)Wire.end();
+  const bool began = Wire.begin(I2C_SDA, I2C_SCL);
+  const bool configured = began && Wire.setClock(I2C_CLOCK_HZ);
+  if (configured) Wire.setTimeOut(I2C_TIMEOUT_MS);
+  i2cControllerOperational = configured;
+  mpuReady = false;
+  opticalReady = false;
+  fallState = FALL_IDLE;
+  stationaryStartedAt = 0;
+  mpuConsecutiveErrors = 0;
+  resetVitalsState();
+  lastMpuRetry = millis();
+  lastOpticalRetry = millis();
+  Serial.printf("[BUS] CONTROLLER_RESTORE=%s attempt=%u/%u; sensors NOT_READY until verified.\n",
+                configured ? "OK" : "FAILED",
+                (unsigned int)sharedI2cRestartCount,
+                (unsigned int)SHARED_I2C_RESTART_BUDGET);
 }
 
 bool configureMax30100() {
@@ -1172,6 +1247,7 @@ void reportOpticalSignal() {
 }
 
 void updateOpticalSensor() {
+  if (!i2cControllerOperational) return; // Do not probe sensors without a controller.
   unsigned long now = millis();
 
   if (!opticalReady) {
@@ -1316,9 +1392,10 @@ void setup() {
   pinMode(PIN_LED, OUTPUT);
   digitalWrite(PIN_LED, LOW);
 
-  Wire.begin(I2C_SDA, I2C_SCL);
-  Wire.setClock(I2C_CLOCK_HZ);
-  Wire.setTimeOut(I2C_TIMEOUT_MS);
+  const bool initialBus = Wire.begin(I2C_SDA, I2C_SCL);
+  i2cControllerOperational = initialBus && Wire.setClock(I2C_CLOCK_HZ);
+  if (i2cControllerOperational) Wire.setTimeOut(I2C_TIMEOUT_MS);
+  else lastSharedI2cRestartAt = millis() - SHARED_I2C_RESTART_INTERVAL_MS;
 
   Serial.println();
   Serial.println("=======================================================");
@@ -1326,6 +1403,7 @@ void setup() {
   Serial.println("=======================================================");
   Serial.println("[FIRMWARE] shared-bus-diagnostic-v13-20261010");
   Serial.println("[ALGORITHM] fall-pulse-confidence-v16-20261010");
+  Serial.println("[BUS_POLICY] failclosed-recurrence-v17-20261011");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
@@ -1357,11 +1435,15 @@ void setup() {
   advertising->setMinPreferred(0x12);
   BLEDevice::startAdvertising();
 
-  // Probe both sensors once; failure never prevents SOS/BLE startup.
-  tryInitializeMpu();
-  lastMpuRetry = millis();
-  identifyAndConfigureOptical();
-  lastOpticalRetry = millis();
+  // Never probe sensors after failed I2C initialization.
+  if (i2cControllerOperational) {
+    tryInitializeMpu();
+    lastMpuRetry = millis();
+    identifyAndConfigureOptical();
+    lastOpticalRetry = millis();
+  } else {
+    Serial.println("[BUS] CONTROLLER_INIT_FAILED; sensor probing suspended, SOS/BLE remain independent.");
+  }
 
   Serial.println("[READY] BLE + SOS active. Sensor failures are non-fatal.");
   Serial.println("[READY] Quiet mode: idle no-finger vitals are suppressed.");
@@ -1385,6 +1467,8 @@ void loop() {
     pServer->startAdvertising();
   }
 
+  // Controller restoration is independent of sensor retries and bounded.
+  maintainI2cController();
   // Sensor work is bounded and each path has a short I2C timeout.
   updateMpuFallDetection();
   updateButtonState();
