@@ -68,6 +68,19 @@ with tempfile.TemporaryDirectory(prefix='naari-cleanup-') as temp:
     assert attempt.returncode != 0, 'lookalike mathematical-render branch must not be allowlisted'
     print('PASS cleanup rejects mathematical-render lookalike branch')
 
+    v17 = 'fix/naari-recurrent-i2c-failclosed-v17'
+    v17_ref = f'refs/heads/{v17}'
+    git(work, 'push', 'origin', f'HEAD:{v17_ref}')
+    env['REPAIR_BRANCH'] = v17
+    env['REPAIR_HEAD'] = newer
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode == 0, attempt.stderr
+    assert not git(remote, 'for-each-ref', '--format=%(refname)', v17_ref)
+    print('PASS cleanup deletes exactly the verified v17 repair branch')
+    env['REPAIR_BRANCH'] = v17 + '-lookalike'
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode != 0, 'lookalike v17 branch must be rejected'
+
     env['REPAIR_BRANCH'] = 'fix/naari-formal-assurance-v12-extra'
     attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
     assert attempt.returncode != 0, 'lookalike v12 branch must not be allowlisted'
