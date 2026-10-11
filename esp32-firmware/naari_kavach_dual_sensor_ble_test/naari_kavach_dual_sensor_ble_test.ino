@@ -1373,7 +1373,7 @@ void updateOpticalSensor() {
     // Clear an obsolete published channel on a validity transition only.
     // A stable partial acquisition must never broadcast ACQUIRING each second.
     if (currentVitalsMask != 3u && currentVitalsMask != lastReportedVitalsMask &&
-        lastReportedVitalsMask != 0u) {
+        (currentVitalsMask != 0u || lastReportedVitalsMask != 0u)) {
       sendBleEvent("VITALS:ACQUIRING");
     }
 
