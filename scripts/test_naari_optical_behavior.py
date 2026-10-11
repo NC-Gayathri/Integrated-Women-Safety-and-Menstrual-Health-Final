@@ -41,6 +41,7 @@ CASES = [
     'failed_controller_blocks_all_sensor_io',
     'failed_controller_clock_config_blocks_io',
     'restart_budget_persistent_escalation',
+    'fifo_poll_rate_limited', 'fifo_stall_recovery_rate_limited',
 ]
 with tempfile.TemporaryDirectory(prefix='naari-sensors-') as temporary:
     executable = str(Path(temporary) / 'readiness-test')

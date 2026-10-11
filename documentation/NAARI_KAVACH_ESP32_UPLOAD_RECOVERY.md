@@ -155,3 +155,7 @@ Repository CI can prove source-level contracts, host regressions and compilation
 ## v17 live binary acceptance (11 October 2026)
 
 The historical `[FIRMWARE] shared-bus-diagnostic-v13-20261010` marker is still emitted for legacy tracing, but the current **v17 required source/merged-image/live-serial marker** is `[BUS_POLICY] failclosed-recurrence-v17-20261011`. The `ble-bridge/flash_ble.ps1` helper must reject builds or boots lacking this new marker. A log without its fresh startup header does not establish that new controller-fault containment is flashed.
+
+## v18 live binary identification (11 October 2026)
+
+The current production test sketch now additionally reports `[FIFO_POLICY] optical-poll-vitals-v18-20261011`. The verified Windows flash helper checks this v18 marker in the source, compiled merged binary and fresh physical serial startup. A board showing only the retained `[FIRMWARE] shared-bus-diagnostic-v13-20261010`, v16 algorithm marker or v17 bus-policy marker **has not proved that the new optical poll/rate-limit changes are flashed**. Do not confuse successful CI or flashing with verified electrical stability.

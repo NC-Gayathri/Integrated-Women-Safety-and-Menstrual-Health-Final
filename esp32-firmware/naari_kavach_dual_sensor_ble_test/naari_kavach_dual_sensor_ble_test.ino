@@ -47,6 +47,8 @@ BLEServer* pServer = nullptr;
 BLECharacteristic* pTxCharacteristic = nullptr;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
+// Tracks what a connected client can last have been sent, not sensor confidence.
+uint8_t lastReportedVitalsMask = 0;
 
 // -----------------------------------------------------------------------------
 // Hardware
@@ -98,6 +100,7 @@ bool oldDeviceConnected = false;
 #define SHARED_I2C_RESTART_BUDGET 2
 #define VITALS_REPORT_INTERVAL_MS 1000
 #define OPTICAL_SAMPLE_PERIOD_MS 10 // Both verified configurations: 100 samples/s.
+#define OPTICAL_FIFO_POLL_INTERVAL_MS 10 // Never hammer the shared bus faster than 100 Hz.
 #define OPTICAL_SAMPLE_MAX_AGE_MS 500
 #define OPTICAL_SETTLE_SAMPLES 100 // One second of samples at the verified 100 Hz.
 // Numeric vitals need a stronger optical level than the permissive contact gate.
@@ -154,6 +157,11 @@ class MyServerCallbacks : public BLEServerCallbacks {
 };
 
 void sendBleEvent(const String& payload) {
+  // Clearing an old measurement also resets the publication state. Future
+  // reporting only announces a change, not the same ACQUIRING state every second.
+  if (payload == "VITALS:ACQUIRING" || payload == "VITALS:NO_VALID_READING") {
+    lastReportedVitalsMask = 0;
+  }
   if (deviceConnected && pTxCharacteristic != nullptr) {
     pTxCharacteristic->setValue(payload.c_str());
     pTxCharacteristic->notify();
@@ -570,6 +578,8 @@ unsigned long lastOpticalRetry = 0;
 unsigned long lastVitalsReport = 0;
 unsigned long lastSensorStatusReport = 0;
 unsigned long lastOpticalSampleAt = 0;
+unsigned long lastOpticalPollAt = 0;
+unsigned long lastOpticalStallCheckAt = 0;
 
 // Real-signal processing state.
 double irDc = 0.0;
@@ -1268,8 +1278,13 @@ void updateOpticalSensor() {
   // Bound the amount of sensor work performed per loop so SOS remains responsive.
   int samplesReadThisLoop = 0;
 
-  for (int attempt = 0; attempt < 2; ++attempt) {
-    updateButtonState();
+  // Running the main loop at millisecond granularity must not turn an empty
+  // 100-sps FIFO into thousands of unnecessary shared-bus transactions.
+  // The existing two-sample bounded drain still catches up after scheduling jitter.
+  if (now - lastOpticalPollAt >= OPTICAL_FIFO_POLL_INTERVAL_MS) {
+    lastOpticalPollAt = now;
+    for (int attempt = 0; attempt < 2; ++attempt) {
+      updateButtonState();
 
     uint32_t red = 0;
     uint32_t ir = 0;
@@ -1283,8 +1298,9 @@ void updateOpticalSensor() {
 
     if (!gotSample) break;
 
-    samplesReadThisLoop++;
-    processOpticalSample(red, ir);
+      samplesReadThisLoop++;
+      processOpticalSample(red, ir);
+    }
   }
 
   if (!opticalReady) return; // Any FIFO/metadata fault requires reset before reads.
@@ -1311,7 +1327,9 @@ void updateOpticalSensor() {
   // no finger present. If samples stop, distinguish an unplugged bus from a
   // sensor that still ACKs but needs reconfiguration. This check is infrequent
   // and each I2C operation is bounded by I2C_TIMEOUT_MS.
-  if (samplesReadThisLoop == 0 && now - lastOpticalSampleAt > 1500) {
+  if (samplesReadThisLoop == 0 && now - lastOpticalSampleAt > 1500 &&
+      now - lastOpticalStallCheckAt >= OPTICAL_RETRY_INTERVAL_MS) {
+    lastOpticalStallCheckAt = now;
     uint8_t livePartId = 0;
     bool busAlive = probeAddress(MAX3010X_ADDR) &&
                     readRegister8(MAX3010X_ADDR, 0xFF, livePartId);
@@ -1350,7 +1368,12 @@ void updateOpticalSensor() {
 
     // Clear the phone's old pair before restoring whichever estimates are
     // currently valid. A lost SpO2 window must not leave an old value visible.
-    if (!heartRateValid || !spo2Valid) {
+    const uint8_t currentVitalsMask =
+        (heartRateValid ? 1u : 0u) | (spo2Valid ? 2u : 0u);
+    // Clear an obsolete published channel on a validity transition only.
+    // A stable partial acquisition must never broadcast ACQUIRING each second.
+    if (currentVitalsMask != 3u && currentVitalsMask != lastReportedVitalsMask &&
+        (currentVitalsMask != 0u || lastReportedVitalsMask != 0u)) {
       sendBleEvent("VITALS:ACQUIRING");
     }
 
@@ -1361,6 +1384,7 @@ void updateOpticalSensor() {
     if (spo2Valid) {
       sendBleEvent(String("SPO2:") + String((int)lroundf(latestSpo2)));
     }
+    lastReportedVitalsMask = currentVitalsMask;
   }
 }
 
@@ -1404,6 +1428,7 @@ void setup() {
   Serial.println("[FIRMWARE] shared-bus-diagnostic-v13-20261010");
   Serial.println("[ALGORITHM] fall-pulse-confidence-v16-20261010");
   Serial.println("[BUS_POLICY] failclosed-recurrence-v17-20261011");
+  Serial.println("[FIFO_POLICY] optical-poll-vitals-v18-20261011");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);

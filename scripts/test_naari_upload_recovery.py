@@ -30,7 +30,11 @@ assert marker == 'shared-bus-diagnostic-v13-20261010', f'unexpected current mark
 expected_line = f'[FIRMWARE] {marker}'
 policy_line = '[BUS_POLICY] failclosed-recurrence-v17-20261011'
 assert policy_line in firmware, 'current fail-closed controller policy must be in production sketch'
-assert policy_line in FLASH.read_text(encoding='utf-8'), 'flash helper must reject older firmware'
+assert policy_line in firmware, 'v17 controller policy must be preserved'
+newest_line = '[FIFO_POLICY] optical-poll-vitals-v18-20261011'
+assert newest_line in firmware, 'current optical polling and vitals build marker must be in sketch'
+assert newest_line in FLASH.read_text(encoding='utf-8'), 'flash helper must reject obsolete v17 binaries'
+assert policy_line in README.read_text(encoding='utf-8'), 'v17 policy reference must be documented'
 
 
 for path in [README, RECOVERY, OPTICAL]:

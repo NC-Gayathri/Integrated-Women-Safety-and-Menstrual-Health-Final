@@ -73,6 +73,38 @@ int main(int argc, char** argv) {
       pulse(1600, 100);
       require(heartRateValid && filteredBpm >= 59 && filteredBpm <= 61,
               "four or more consistent beats must eventually acquire the true 60 BPM fixture");
+    } else if (name == "acquiring_not_reannounced_every_second") {
+      pulse(280, 100);
+      require(fingerPresent && !heartRateValid && irEnvelope > 10.0,
+              "fixture needs live contact with pulsation but insufficient beat confidence");
+      Serial.output.clear();
+      for (int i = 0; i < 3; ++i) {
+        lastVitalsReport = millis() - VITALS_REPORT_INTERVAL_MS;
+        updateOpticalSensor();
+        delay(OPTICAL_FIFO_POLL_INTERVAL_MS);
+      }
+      require(occurrences(Serial.output, "[EVENT] VITALS:ACQUIRING") == 0,
+              "unchanged acquiring state must not flood BLE once per second");
+      noNumbers();
+    } else if (name == "partial_report_clear_only_on_transition") {
+      pulse();
+      require(heartRateValid && spo2Valid, "established full vitals required");
+      report(); // Publish the old complete pair first.
+      for (int i = 0; i < 200; ++i) {
+        delay(10);
+        processOpticalSample(30000,
+          static_cast<uint32_t>(60000 + 1000 * sin(2.0 * 3.141592653589793 * i / 100)));
+      }
+      require(heartRateValid && !spo2Valid, "must retain only HR");
+      Serial.output.clear();
+      for (int i = 0; i < 2; ++i) {
+        lastVitalsReport = millis() - VITALS_REPORT_INTERVAL_MS;
+        updateOpticalSensor(); // Retain both events; report() clears Serial.output.
+      }
+      require(occurrences(Serial.output, "[EVENT] VITALS:ACQUIRING") == 1,
+              "full-to-partial transition should clear stale SpO2 once, not on every HR update");
+      require(occurrences(Serial.output, "[EVENT] HEART_RATE:") == 2,
+              "partial valid HR must remain continuously publishable");
     } else if (name == "bright_flat_ripple_rejected") {
       // Mirrors the ~246k-DC, ~62-AC weak oscillation from the real serial log.
       // A bright stationary contact must not yield HEART_RATE:150 from noise.

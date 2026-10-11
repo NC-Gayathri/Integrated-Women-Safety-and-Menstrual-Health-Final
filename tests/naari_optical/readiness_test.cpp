@@ -87,6 +87,35 @@ int main(int argc, char** argv) {
       uint32_t red = 99, ir = 99;
       require(!readMax30102Sample(red, ir), "partial FIFO transfer must not become a sample");
       require(!opticalReady, "partial FIFO transfer must schedule reinitialization");
+    } else if (name == "fifo_poll_rate_limited") {
+      require(identifyAndConfigureOptical(), "configured optical sensor required");
+      // No clock movement: never hammer FIFO metadata for one 100-Hz slot.
+      Wire.operationMs = 0;
+      delay(OPTICAL_FIFO_POLL_INTERVAL_MS + 1);
+      updateOpticalSensor();
+      const auto polls = Wire.transactions;
+      for (int i = 0; i < 50; ++i) updateOpticalSensor();
+      require(Wire.transactions == polls,
+              "empty FIFO must not be polled repeatedly within one sample interval");
+      delay(OPTICAL_FIFO_POLL_INTERVAL_MS);
+      updateOpticalSensor();
+      require(Wire.transactions > polls, "the next due interval must be polled");
+    } else if (name == "fifo_stall_recovery_rate_limited") {
+      require(identifyAndConfigureOptical(), "configured optical sensor required");
+      Wire.operationMs = 0;
+      testClock = 3000;
+      Serial.output.clear();
+      updateOpticalSensor();
+      const std::string marker = "Device responds but FIFO stalled; reconfiguring.";
+      require(Serial.output.find(marker) != std::string::npos,
+              "unresponsive FIFO must still trigger a real reconfiguration");
+      const auto first = Serial.output.find(marker);
+      for (int i = 0; i < 50; ++i) {
+        delay(10);
+        updateOpticalSensor();
+      }
+      require(Serial.output.find(marker, first + marker.size()) == std::string::npos,
+              "stalled FIFO must not trigger repeated sensor resets within 2 seconds");
     } else if (name == "sos_during_init") {
       Wire.operationMs = 50;
       buttonEdges = {{100, LOW}, {280, HIGH}, {400, LOW}, {580, HIGH}, {700, LOW}, {880, HIGH}};

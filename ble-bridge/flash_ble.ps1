@@ -11,7 +11,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ExpectedMarker = '[BUS_POLICY] failclosed-recurrence-v17-20261011'
+$ExpectedMarker = '[FIFO_POLICY] optical-poll-vitals-v18-20261011'
 $Fqbn = 'esp32:esp32:esp32doit-devkit-v1'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $SketchDir = Join-Path $RepoRoot 'esp32-firmware\naari_kavach_dual_sensor_ble_test'
