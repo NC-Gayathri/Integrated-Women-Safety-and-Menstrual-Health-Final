@@ -4,7 +4,7 @@
 
 ## Symbols and precise definitions
 
-All timestamps are unsigned 32-bit values. Let $t$ be the current sample, $w$ the restart-window start, $\rho$ the last restart time, and $n\in\{0,1,2\}$ the number of controller restart attempts already consumed in the current window. Let $H$ be window-active, $P$ be previously-restarted, $K$ be controller-ready, $F_O,F_M$ be optical/MPU fault flags, $R_O,R_M$ be their readiness flags, and $D_S,D_C$ be whether SDA/SCL are sampled LOW.
+All timestamps are unsigned 32-bit values. Let $t$ be the current sample, $w$ the restart-window start, $r$ the last restart time, and $n\in\{0,1,2\}$ the number of controller restart attempts already consumed in the current window. Let $H$ be window-active, $P$ be previously-restarted, $K$ be controller-ready, $F_O,F_M$ be optical/MPU fault flags, $R_O,R_M$ be their readiness flags, and $D_S,D_C$ be whether SDA/SCL are sampled LOW.
 
 ```math
 \begin{aligned}
@@ -12,7 +12,7 @@ All timestamps are unsigned 32-bit values. Let $t$ be the current sample, $w$ th
 X&:=\neg H\lor\Delta(t,w)\ge60000,\\
 n_{\mathrm{eff}}&:=
 \begin{cases}0,&X,\\ n,&\neg X,\end{cases}\\
-C&:=\neg P\lor\Delta(t,\rho)\ge10000,\\
+C&:=\neg P\lor\Delta(t,r)\ge10000,\\
 F&:=F_O\land F_M\land\neg R_O\land\neg R_M,\\
 J&:=F\land C\land\neg D_S\land\neg D_C
  \land(n_{\mathrm{eff}}<2),\\
@@ -57,7 +57,7 @@ This is *not* a voltage measurement: HIGH samples cannot prove correct 3.3 V reg
 ## B05 — the 10-second attempt spacing still applies
 
 ```math
-J\land P\land\bigl(\Delta(t,\rho)<10000\bigr)
+J\land P\land\bigl(\Delta(t,r)<10000\bigr)
 \quad\mathrm{UNSAT}.
 ```
 
