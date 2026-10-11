@@ -1428,6 +1428,7 @@ void setup() {
   Serial.println("[FIRMWARE] shared-bus-diagnostic-v13-20261010");
   Serial.println("[ALGORITHM] fall-pulse-confidence-v16-20261010");
   Serial.println("[BUS_POLICY] failclosed-recurrence-v17-20261011");
+  Serial.println("[FIFO_POLICY] optical-poll-vitals-v18-20261011");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
