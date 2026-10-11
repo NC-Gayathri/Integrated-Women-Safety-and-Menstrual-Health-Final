@@ -435,8 +435,11 @@ int main(int argc, char** argv) {
               "an unusable controller cannot manufacture sensor readiness or fall");
       Wire.beginOk = true;
       Wire.clockOk = true;
+      const auto endsBeforeRestore = Wire.busRestarts;
       delay(SHARED_I2C_RESTART_INTERVAL_MS + 1);
       loop();
+      require(Wire.busRestarts == endsBeforeRestore + 1,
+              "controller restore must cleanly release the old driver before Wire.begin");
       require(i2cControllerOperational,
               "restoring Wire.begin AND setClock may clear the controller gate");
       require(!opticalReady && !mpuReady,
