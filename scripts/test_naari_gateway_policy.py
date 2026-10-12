@@ -73,7 +73,11 @@ class NotificationPolicyTests(unittest.TestCase):
         self.assertNotIn("last_known_bpm", bridge)
         self.assertIn("gateway_vitals.clear()  # New connection", bridge)
         self.assertIn("No BLE notification subscription. Refusing ONLINE heartbeats", bridge)
-        self.assertLess(bridge.index("if subscribed:"), bridge.index("periodic_heartbeat_task(session)"))
+        self.assertLess(bridge.index("if not subscribed:"), bridge.index("heartbeat_task = asyncio.create_task(periodic_heartbeat_task(session))"))
+        self.assertIn('if str(service.uuid).lower() != TARGET_SERVICE_UUID:', bridge)
+        self.assertIn('if str(char.uuid).lower() != TARGET_NOTIFY_CHAR_UUID:', bridge)
+        self.assertNotIn("Fallback subscription on:", bridge)
+        self.assertIn("await heartbeat_task", bridge)
         self.assertIn("heartbeat_task.cancel()", bridge)
         self.assertIn("gateway_vitals.clear()", bridge)
 
