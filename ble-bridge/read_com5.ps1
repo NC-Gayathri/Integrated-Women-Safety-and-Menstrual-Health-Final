@@ -16,6 +16,8 @@ $ExpectedMarker = '[I2C_POLICY] contiguous-fifo-metadata-v19-20261012'
 $serial = $null
 $writer = $null
 $script:markerSeen = $false
+$script:bootMarkerCount = 0
+$script:observationUntil = $null
 $script:opticalReadySeen = $false
 $script:mpuReadySeen = $false
 $script:transportFaults = 0
@@ -26,7 +28,19 @@ function Accept-SerialLine {
     param([string]$Line)
     Write-Host "[ESP32 SERIAL] $Line"
     if ($null -ne $script:writer) { $script:writer.WriteLine($Line) }
-    if ($Line -eq $ExpectedMarker) { $script:markerSeen = $true }
+    if ($Line -eq $ExpectedMarker) {
+        ++$script:bootMarkerCount
+        if ($script:bootMarkerCount -eq 1) {
+            # Measure the ENTIRE requested duration only after real v19 boot.
+            $script:markerSeen = $true
+            $script:observationUntil = (Get-Date).AddSeconds($Seconds)
+            Write-Host "v19 boot detected; now recording a full $Seconds-second interval." -ForegroundColor Cyan
+        } else {
+            # An unsolicited new setup banner invalidates a stability run.
+            ++$script:transportFaults
+            Write-Host 'Additional firmware boot detected; possible ESP32 reset.' -ForegroundColor Red
+        }
+    }
     if ($Line -match '^\[EVENT\] SENSOR:MAX3010[02]:READY$') {
         $script:opticalReadySeen = $true
     }
@@ -72,9 +86,11 @@ try {
         Write-Host 'Transport acceptance enabled: any observed I2C/sensor fault fails this run.' -ForegroundColor Yellow
     }
 
-    $deadline = (Get-Date).AddSeconds($Seconds)
+    $bootDeadline = (Get-Date).AddSeconds(45)
     $buffer = ''
-    while ((Get-Date) -lt $deadline) {
+    while ($true) {
+        if (-not $script:markerSeen -and (Get-Date) -ge $bootDeadline) { break }
+        if ($script:markerSeen -and (Get-Date) -ge $script:observationUntil) { break }
         if ($serial.BytesToRead -gt 0) {
             $buffer += $serial.ReadExisting()
             while ($buffer.Contains("`n")) {
