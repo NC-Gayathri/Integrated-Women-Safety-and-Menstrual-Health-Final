@@ -94,6 +94,10 @@ class NotificationPolicyTests(unittest.TestCase):
         self.assertIn("exit 4", serial)
         self.assertIn("exit 5", serial)
         self.assertIn("exit 2", serial)
+        self.assertIn("$script:observationUntil = (Get-Date).AddSeconds($Seconds)", serial)
+        self.assertIn("if ($script:bootMarkerCount -eq 1)", serial)
+        self.assertIn("Additional firmware boot detected", serial)
+        self.assertIn("$bootDeadline = (Get-Date).AddSeconds(45)", serial)
 
 
 if __name__ == "__main__":
