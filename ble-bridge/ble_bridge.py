@@ -362,61 +362,45 @@ async def run_gateway_bridge():
                     subscribed = False
                     callback = lambda sender, data: handle_ble_notification(sender, data, session)
 
-                    # Iterate over services and characteristics
+                    # Only the documented NAARI service and notification UUID
+                    # may trigger emergency dispatches. Arbitrary-characteristic
+                    # fallback can subscribe to an unrelated stream.
                     for service in client.services:
-                        s_uuid = str(service.uuid).lower()
+                        if str(service.uuid).lower() != TARGET_SERVICE_UUID:
+                            continue
                         for char in service.characteristics:
-                            c_uuid = str(char.uuid).lower()
-                            props = char.properties
-
-                            # Exact match on verified characteristic UUID
-                            if c_uuid == TARGET_NOTIFY_CHAR_UUID or TARGET_NOTIFY_CHAR_UUID in c_uuid:
-                                try:
-                                    await client.start_notify(char.uuid, callback)
-                                    log_stage("BLE_SUBSCRIBED", f"Subscribed to TARGET Characteristic: {char.uuid} ({service.description})")
-                                    subscribed = True
-                                except Exception as e:
-                                    log_error(f"Failed to subscribe to target characteristic {char.uuid}: {e}")
-                            elif "notify" in props or "indicate" in props:
-                                # Fallback subscription if matching service
-                                if s_uuid == TARGET_SERVICE_UUID:
-                                    try:
-                                        await client.start_notify(char.uuid, callback)
-                                        log_stage("BLE_SUBSCRIBED", f"Subscribed to Service Characteristic: {char.uuid}")
-                                        subscribed = True
-                                    except Exception as e:
-                                        log_warn(f"Could not subscribe to {char.uuid}: {e}")
+                            if str(char.uuid).lower() != TARGET_NOTIFY_CHAR_UUID:
+                                continue
+                            if "notify" not in char.properties and "indicate" not in char.properties:
+                                continue
+                            try:
+                                await client.start_notify(char.uuid, callback)
+                                log_stage("BLE_SUBSCRIBED", f"Subscribed to verified NAARI Characteristic: {char.uuid}")
+                                subscribed = True
+                            except Exception as e:
+                                log_error(f"Failed to subscribe to verified NAARI characteristic {char.uuid}: {e}")
 
                     if not subscribed:
-                        log_warn(f"Target characteristic {TARGET_NOTIFY_CHAR_UUID} not found in GATT tree. Attempting fallback subscription to any notify characteristic...")
-                        for service in client.services:
-                            for char in service.characteristics:
-                                if "notify" in char.properties or "indicate" in char.properties:
-                                    try:
-                                        await client.start_notify(char.uuid, callback)
-                                        log_stage("BLE_SUBSCRIBED", f"Fallback subscription on: {char.uuid}")
-                                        subscribed = True
-                                    except Exception:
-                                        pass
-
-                    if subscribed:
-                        log_success(f"Gateway Bridge is ACTIVE, Connected to ESP32, and listening for emergency events!")
-                    else:
                         log_error("No BLE notification subscription. Refusing ONLINE heartbeats; reconnecting.")
+                        await asyncio.sleep(2)
                         continue
 
-                    # Start periodic background heartbeat to keep device ONLINE in backend
+                    log_success("Gateway Bridge is connected and subscribed to the verified NAARI notification characteristic.")
                     heartbeat_task = asyncio.create_task(periodic_heartbeat_task(session))
-
-                    # Send immediate initial heartbeat to immediately flip mobile card from OFFLINE to ONLINE
-                    await dispatch_iot_event(session, "STATUS_HEARTBEAT", heart_rate=gateway_vitals.current_bpm(time.time()))
-
-                    # Monitor connection loop
-                    while client.is_connected and client_running:
-                        await asyncio.sleep(1)
-
-                    log_warn("ESP32 BLE connection dropped! Cancelling heartbeat and reconnecting...")
-                    heartbeat_task.cancel()
+                    try:
+                        await dispatch_iot_event(
+                            session, "STATUS_HEARTBEAT", heart_rate=gateway_vitals.current_bpm(time.time()))
+                        while client.is_connected and client_running:
+                            await asyncio.sleep(1)
+                    finally:
+                        # Even an unexpected client exception must stop false
+                        # ONLINE heartbeats before the outer reconnection loop.
+                        heartbeat_task.cancel()
+                        try:
+                            await heartbeat_task
+                        except asyncio.CancelledError:
+                            pass
+                    log_warn("ESP32 BLE connection dropped; heartbeat stopped.")
 
             except Exception as e:
                 log_error(f"Gateway bridge exception: {e}")
