@@ -60,6 +60,21 @@ jobs:
       - name: Verify fail-closed BLE gateway and real-device diagnostic policy
         run: python3 scripts/test_naari_gateway_policy.py
 
+      - name: Parse Windows PowerShell physical serial diagnostic script
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path './ble-bridge/read_com5.ps1').Path,
+            [ref]$tokens,
+            [ref]$errors
+          )
+          if ($errors.Count -ne 0) {
+            $errors | ForEach-Object { Write-Error $_.ToString() }
+            throw 'Physical serial diagnostic PowerShell failed to parse.'
+          }
+
       - name: Prove cleanup preserves concurrent branch updates
         run: python3 scripts/test_naari_branch_cleanup.py
 
