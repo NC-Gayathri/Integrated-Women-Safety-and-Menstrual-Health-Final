@@ -244,15 +244,20 @@ bool writeRegister8(uint8_t addr, uint8_t reg, uint8_t value) {
 bool readBytes(uint8_t addr, uint8_t reg, uint8_t* buffer, uint8_t length,
                bool retrySafe = true) {
   const uint8_t attempts = retrySafe ? I2C_TRANSACTION_ATTEMPTS : 1;
+  uint8_t lastTxError = 0;
+  int lastReceived = -1;
   for (uint8_t attempt = 0; attempt < attempts; ++attempt) {
     updateButtonState();
     Wire.beginTransmission(addr);
     Wire.write(reg);
     uint8_t txError = retrySafe && attempt == 0 ? Wire.endTransmission(false) :
                                     Wire.endTransmission(true);
+    lastTxError = txError;
+    lastReceived = -1;
     updateButtonState();
     if (txError == 0) {
       int received = Wire.requestFrom((int)addr, (int)length, (int)true);
+      lastReceived = received;
       updateButtonState();
       if (received == length) {
         for (uint8_t i = 0; i < length; ++i) buffer[i] = Wire.read();
@@ -261,10 +266,15 @@ bool readBytes(uint8_t addr, uint8_t reg, uint8_t* buffer, uint8_t length,
       while (Wire.available()) (void)Wire.read();
       // A partial FIFO read can advance the hardware pointer. Discard it;
       // never turn the remainder plus a retry into an apparently valid sample.
-      if (!retrySafe || received > 0) return false;
+      if (!retrySafe || received > 0) break;
     }
     delay(1);
   }
+  // Report the last complete attempt; a short FIFO transfer is never retried
+  // because the device's read pointer may already have advanced.
+  Serial.printf("[I2C] Burst failed addr=0x%02X reg=0x%02X len=%u tx=%u rx=%d SDA=%d SCL=%d.\n",
+                addr, reg, (unsigned int)length, lastTxError, lastReceived,
+                digitalRead(I2C_SDA), digitalRead(I2C_SCL));
   return false;
 }
 
@@ -965,16 +975,17 @@ bool readOpticalFifo(uint8_t reg, uint8_t* buffer, uint8_t length) {
 }
 
 bool readMax30100Sample(uint32_t& red, uint32_t& ir) {
-  uint8_t wr = 0;
-  uint8_t rd = 0;
-  uint8_t overflow = 0;
-  if (!readRegister8(MAX3010X_ADDR, 0x02, wr) ||
-      !readRegister8(MAX3010X_ADDR, 0x04, rd) ||
-      !readRegister8(MAX3010X_ADDR, 0x03, overflow)) {
-    // Exhausted register retries are a transport fault, not an empty FIFO.
-    markOpticalI2cFailure("FIFO metadata read");
+  // MAX30100 0x02 WR, 0x03 OVF and 0x04 RD are consecutive registers.
+  // Read one coherent metadata snapshot instead of three independent I2C
+  // transactions at every 100-Hz polling interval.
+  uint8_t meta[3] = {};
+  if (!readBytes(MAX3010X_ADDR, 0x02, meta, sizeof(meta))) {
+    markOpticalI2cFailure("FIFO metadata burst");
     return false;
   }
+  const uint8_t wr = meta[0] & 0x0F;
+  const uint8_t overflow = meta[1];
+  const uint8_t rd = meta[2] & 0x0F;
   if ((overflow & 0x0F) != 0) {
     opticalReady = false;
     resetVitalsState();
@@ -984,8 +995,6 @@ bool readMax30100Sample(uint32_t& red, uint32_t& ir) {
     return false;
   }
 
-  wr &= 0x0F;
-  rd &= 0x0F;
   if (wr == rd) return false; // No unread sample.
 
   uint8_t raw[4];
@@ -998,16 +1007,18 @@ bool readMax30100Sample(uint32_t& red, uint32_t& ir) {
 }
 
 bool readMax30102Sample(uint32_t& red, uint32_t& ir) {
-  uint8_t wr = 0;
-  uint8_t rd = 0;
-  uint8_t overflow = 0;
-  // Check before popping: MAX30102 clears overflow when a sample is read.
-  if (!readRegister8(MAX3010X_ADDR, 0x04, wr) ||
-      !readRegister8(MAX3010X_ADDR, 0x06, rd) ||
-      !readRegister8(MAX3010X_ADDR, 0x05, overflow)) {
-    markOpticalI2cFailure("FIFO metadata read");
+  // The MAX30102 FIFO WR (0x04), overflow (0x05) and RD (0x06) registers
+  // auto-increment on a normal register burst (FIFO_DATA at 0x07 is special).
+  // A single read is both cheaper on the shared bus and temporally coherent.
+  // Check overflow BEFORE popping: the MAX30102 clears it after consumption.
+  uint8_t meta[3] = {};
+  if (!readBytes(MAX3010X_ADDR, 0x04, meta, sizeof(meta))) {
+    markOpticalI2cFailure("FIFO metadata burst");
     return false;
   }
+  const uint8_t wr = meta[0] & 0x1F;
+  const uint8_t overflow = meta[1];
+  const uint8_t rd = meta[2] & 0x1F;
   if ((overflow & 0x1F) != 0) {
     opticalReady = false;
     resetVitalsState();
@@ -1017,8 +1028,6 @@ bool readMax30102Sample(uint32_t& red, uint32_t& ir) {
     return false;
   }
 
-  wr &= 0x1F;
-  rd &= 0x1F;
   if (wr == rd) return false; // No unread sample.
 
   uint8_t raw[6];
@@ -1429,6 +1438,7 @@ void setup() {
   Serial.println("[ALGORITHM] fall-pulse-confidence-v16-20261010");
   Serial.println("[BUS_POLICY] failclosed-recurrence-v17-20261011");
   Serial.println("[FIFO_POLICY] optical-poll-vitals-v18-20261011");
+  Serial.println("[I2C_POLICY] contiguous-fifo-metadata-v19-20261012");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
