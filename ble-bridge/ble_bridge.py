@@ -19,12 +19,12 @@ import asyncio
 import os
 import sys
 import time
-import re
 import argparse
 import aiohttp
 from pathlib import Path
 from dotenv import load_dotenv
 from bleak import BleakScanner, BleakClient
+from ble_event_policy import GatewayVitals, classify_notification
 
 # Configure UTF-8 encoding on Windows to prevent charmap UnicodeEncodeError
 if sys.platform == "win32":
@@ -67,7 +67,7 @@ EVENT_COOLDOWN_SECONDS = 1.0
 
 # Global Runtime State
 seq_counter = 0
-last_known_bpm = None  # Strictly populated ONLY from actual MAX30102 readings; never mock
+gateway_vitals = GatewayVitals()  # Only recently verified optical samples; invalid events clear the cache.
 last_event_time = {}
 client_running = True
 
@@ -171,7 +171,7 @@ async def dispatch_iot_event(
 # 4. BLE NOTIFICATION PROCESSING
 # -------------------------------------------------------------------------------------------
 def handle_ble_notification(sender, data: bytearray, session: aiohttp.ClientSession):
-    global last_known_bpm, last_event_time
+    global last_event_time
 
     try:
         raw_text = data.decode("utf-8", errors="ignore").strip()
@@ -183,9 +183,17 @@ def handle_ble_notification(sender, data: bytearray, session: aiohttp.ClientSess
 
     now = time.time()
     log_stage("BLE_NOTIFICATION", f"Sender: {sender} | Raw Bytes: {bytes(data)} | Text: '{raw_text}'")
+    kind, bpm = classify_notification(raw_text)
+    gateway_vitals.observe(kind, bpm, now)
 
-    # 1. SOS Notification Handler
-    if "SOS" in raw_text.upper():
+    # Invalidation events from the ESP32 must immediately prevent an old BPM
+    # from being attached to an SOS, fall event or future online heartbeat.
+    if kind == "invalid":
+        log_warn(f"Optical data not valid: '{raw_text}'. Gateway BPM cache cleared.")
+        return
+
+    # 1. SOS Notification Handler: match exact protocol token, never substrings.
+    if kind == "sos":
         if now - last_event_time.get("BUTTON_SOS", 0) > EVENT_COOLDOWN_SECONDS:
             last_event_time["BUTTON_SOS"] = now
             log_alert("[EMERGENCY] PHYSICAL SOS BUTTON EVENT DETECTED ('SOS')! Forwarding BUTTON_SOS to backend...")
@@ -193,7 +201,7 @@ def handle_ble_notification(sender, data: bytearray, session: aiohttp.ClientSess
                 dispatch_iot_event(
                     session=session,
                     event_type="BUTTON_SOS",
-                    heart_rate=last_known_bpm,
+                    heart_rate=gateway_vitals.current_bpm(time.time()),
                     fall_detected=False,
                 )
             )
@@ -201,7 +209,7 @@ def handle_ble_notification(sender, data: bytearray, session: aiohttp.ClientSess
             log_warn(f"Duplicate SOS notification within {EVENT_COOLDOWN_SECONDS}s ignored.")
 
     # 2. Fall Detection Handler
-    elif "FALL" in raw_text.upper():
+    elif kind == "fall":
         if now - last_event_time.get("FALL_DETECTED", 0) > EVENT_COOLDOWN_SECONDS:
             last_event_time["FALL_DETECTED"] = now
             log_alert("[ALERT] FALL DETECTED EVENT ('FALL_DETECTED')! Forwarding FALL_DETECTED to backend...")
@@ -209,7 +217,7 @@ def handle_ble_notification(sender, data: bytearray, session: aiohttp.ClientSess
                 dispatch_iot_event(
                     session=session,
                     event_type="FALL_DETECTED",
-                    heart_rate=last_known_bpm,
+                    heart_rate=gateway_vitals.current_bpm(time.time()),
                     fall_detected=True,
                 )
             )
@@ -217,48 +225,39 @@ def handle_ble_notification(sender, data: bytearray, session: aiohttp.ClientSess
             log_warn(f"Duplicate Fall notification within {EVENT_COOLDOWN_SECONDS}s ignored.")
 
     # 3. Status Online Handler
-    elif "STATUS:ONLINE" in raw_text.upper():
+    elif kind == "online":
         log_success("ESP32 reported 'STATUS:ONLINE' - Gateway link verified!")
         asyncio.create_task(
             dispatch_iot_event(
                 session=session,
                 event_type="STATUS_HEARTBEAT",
-                heart_rate=last_known_bpm,
+                heart_rate=gateway_vitals.current_bpm(time.time()),
                 fall_detected=False,
             )
         )
 
-    # 4. Heart Rate Telemetry Handler ("HEART_RATE:<BPM>" or "HR:<BPM>" or numeric)
-    elif "HEART_RATE" in raw_text.upper() or "HR:" in raw_text.upper() or raw_text.isdigit():
-        match = re.search(r"(\d+)", raw_text)
-        if match:
-            bpm = int(match.group(1))
-            if 30 <= bpm <= 230:
-                last_known_bpm = bpm
-                log_info(f"[HEART_RATE] Live Heart Rate received from ESP32: {bpm} BPM")
-
-                # Forward as routine heartbeat
-                asyncio.create_task(
-                    dispatch_iot_event(
-                        session=session,
-                        event_type="STATUS_HEARTBEAT",
-                        heart_rate=bpm,
-                        fall_detected=False,
-                    )
+    # 4. Heart Rate Telemetry Handler: exact numeric prefix, validated range.
+    elif kind == "heart_rate":
+        log_info(f"[HEART_RATE] Live Heart Rate received from ESP32: {bpm} BPM")
+        asyncio.create_task(
+            dispatch_iot_event(
+                session=session,
+                event_type="STATUS_HEARTBEAT",
+                heart_rate=bpm,
+                fall_detected=False,
+            )
+        )
+        if (bpm < 45 or bpm > 130) and (now - last_event_time.get("HEART_RATE_EMERGENCY", 0) > 30):
+            last_event_time["HEART_RATE_EMERGENCY"] = now
+            log_alert(f"[ALERT] ABNORMAL HEART RATE ({bpm} BPM)! Forwarding HEART_RATE_EMERGENCY to backend...")
+            asyncio.create_task(
+                dispatch_iot_event(
+                    session=session,
+                    event_type="HEART_RATE_EMERGENCY",
+                    heart_rate=bpm,
+                    fall_detected=False,
                 )
-
-                # Abnormal BPM detection (e.g. >130 or <45)
-                if (bpm < 45 or bpm > 130) and (now - last_event_time.get("HEART_RATE_EMERGENCY", 0) > 30):
-                    last_event_time["HEART_RATE_EMERGENCY"] = now
-                    log_alert(f"[ALERT] ABNORMAL HEART RATE ({bpm} BPM)! Forwarding HEART_RATE_EMERGENCY to backend...")
-                    asyncio.create_task(
-                        dispatch_iot_event(
-                            session=session,
-                            event_type="HEART_RATE_EMERGENCY",
-                            heart_rate=bpm,
-                            fall_detected=False,
-                        )
-                    )
+            )
     else:
         log_info(f"Unhandled BLE notification payload: '{raw_text}'")
 
@@ -270,11 +269,11 @@ async def periodic_heartbeat_task(session: aiohttp.ClientSession):
         try:
             await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
             if client_running:
-                log_info(f"Sending periodic background heartbeat (BPM: {last_known_bpm or '--'})...")
+                log_info(f"Sending periodic background heartbeat (BPM: {gateway_vitals.current_bpm(time.time()) or '--'})...")
                 await dispatch_iot_event(
                     session=session,
                     event_type="STATUS_HEARTBEAT",
-                    heart_rate=last_known_bpm,
+                    heart_rate=gateway_vitals.current_bpm(time.time()),
                     fall_detected=False,
                 )
         except asyncio.CancelledError:
@@ -356,6 +355,7 @@ async def run_gateway_bridge():
                         await asyncio.sleep(3)
                         continue
 
+                    gateway_vitals.clear()  # New connection cannot inherit a previous optical sample.
                     log_stage("BLE_CONNECTED", f"Successfully connected to {TARGET_DEVICE_NAME} [{device.address}]!")
 
                     # Find and subscribe to the explicit notification characteristic
@@ -402,13 +402,14 @@ async def run_gateway_bridge():
                     if subscribed:
                         log_success(f"Gateway Bridge is ACTIVE, Connected to ESP32, and listening for emergency events!")
                     else:
-                        log_error("Failed to subscribe to any notification characteristic!")
+                        log_error("No BLE notification subscription. Refusing ONLINE heartbeats; reconnecting.")
+                        continue
 
                     # Start periodic background heartbeat to keep device ONLINE in backend
                     heartbeat_task = asyncio.create_task(periodic_heartbeat_task(session))
 
                     # Send immediate initial heartbeat to immediately flip mobile card from OFFLINE to ONLINE
-                    await dispatch_iot_event(session, "STATUS_HEARTBEAT", heart_rate=last_known_bpm)
+                    await dispatch_iot_event(session, "STATUS_HEARTBEAT", heart_rate=gateway_vitals.current_bpm(time.time()))
 
                     # Monitor connection loop
                     while client.is_connected and client_running:
@@ -421,6 +422,9 @@ async def run_gateway_bridge():
                 log_error(f"Gateway bridge exception: {e}")
                 log_info("Reconnecting in 4 seconds...")
                 await asyncio.sleep(4)
+            finally:
+                # A disconnected gateway must never keep the preceding BPM.
+                gateway_vitals.clear()
 
 # -------------------------------------------------------------------------------------------
 # 7. DIAGNOSTIC MANUAL TEST MODE
@@ -463,10 +467,10 @@ async def run_interactive_mode():
                     break
                 elif cmd == "sos":
                     log_alert("Dispatching simulated BUTTON_SOS event...")
-                    await dispatch_iot_event(session, "BUTTON_SOS", heart_rate=last_known_bpm, fall_detected=False)
+                    await dispatch_iot_event(session, "BUTTON_SOS", heart_rate=gateway_vitals.current_bpm(time.time()), fall_detected=False)
                 elif cmd == "fall":
                     log_alert("Dispatching simulated FALL_DETECTED event...")
-                    await dispatch_iot_event(session, "FALL_DETECTED", heart_rate=last_known_bpm, fall_detected=True)
+                    await dispatch_iot_event(session, "FALL_DETECTED", heart_rate=gateway_vitals.current_bpm(time.time()), fall_detected=True)
                 elif cmd.startswith("hr"):
                     parts = cmd.split()
                     bpm = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 85
@@ -474,7 +478,7 @@ async def run_interactive_mode():
                     await dispatch_iot_event(session, "STATUS_HEARTBEAT", heart_rate=bpm, fall_detected=False)
                 elif cmd == "stat":
                     log_info("Dispatching simulated STATUS_HEARTBEAT...")
-                    await dispatch_iot_event(session, "STATUS_HEARTBEAT", heart_rate=last_known_bpm, fall_detected=False)
+                    await dispatch_iot_event(session, "STATUS_HEARTBEAT", heart_rate=gateway_vitals.current_bpm(time.time()), fall_detected=False)
                 else:
                     print("Unknown command. Valid options: sos, fall, hr <bpm>, stat, quit")
             except (KeyboardInterrupt, EOFError):
