@@ -93,6 +93,7 @@ jobs:
           grep -Fq '[ALGORITHM] fall-pulse-confidence-v16-20261010' "$F"
           grep -Fq '[BUS_POLICY] failclosed-recurrence-v17-20261011' "$F"
           grep -Fq '[FIFO_POLICY] optical-poll-vitals-v18-20261011' "$F"
+          grep -Fq '[I2C_POLICY] contiguous-fifo-metadata-v19-20261012' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"
