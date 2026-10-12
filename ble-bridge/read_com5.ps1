@@ -54,7 +54,7 @@ try {
         if ([System.IO.File]::Exists($fullPath)) {
             throw "Output log already exists: $fullPath. Use a new filename to preserve old evidence."
         }
-        $writer = New-Object System.IO.StreamWriter(
+        $writer = [System.IO.StreamWriter]::new(
             $fullPath, $false, [System.Text.UTF8Encoding]::new($false))
         $writer.AutoFlush = $true
         Write-Host "Saving actual serial output to $fullPath" -ForegroundColor Cyan
