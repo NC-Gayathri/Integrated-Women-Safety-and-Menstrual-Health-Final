@@ -116,6 +116,36 @@ int main(int argc, char** argv) {
       }
       require(Serial.output.find(marker, first + marker.size()) == std::string::npos,
               "stalled FIFO must not trigger repeated sensor resets within 2 seconds");
+    } else if (name == "fifo_metadata_single_burst_100" ||
+               name == "fifo_metadata_single_burst_102") {
+      require(identifyAndConfigureOptical(), "optical sensor must initialize");
+      const auto start = Wire.transactions;
+      uint32_t red = 99, ir = 99;
+      const bool read = max100 ? readMax30100Sample(red, ir) :
+                                  readMax30102Sample(red, ir);
+      require(!read && opticalReady, "healthy empty FIFO must not report a sample or fault");
+      require(Wire.transactions == start + 1,
+              "consecutive WR/OVF/RD metadata must use exactly one I2C transaction");
+      require(red == 99 && ir == 99, "empty FIFO must not update caller readings");
+    } else if (name == "fifo_metadata_middle_reg_fault_100" ||
+               name == "fifo_metadata_middle_reg_fault_102" ||
+               name == "fifo_metadata_short_burst") {
+      require(identifyAndConfigureOptical(), "optical sensor must initialize");
+      heartRateValid = spo2Valid = fingerPresent = true;
+      filteredBpm = 74; latestSpo2 = 97;
+      if (name == "fifo_metadata_short_burst") Wire.shortMetadata = true;
+      else Wire.failReadReg = max100 ? 0x03 : 0x05;
+      uint32_t red = 99, ir = 99;
+      Serial.output.clear();
+      const bool read = max100 ? readMax30100Sample(red, ir) :
+                                  readMax30102Sample(red, ir);
+      require(!read && !opticalReady && !heartRateValid && !spo2Valid && !fingerPresent,
+              "failed metadata burst must discard stale readings and mark sensor unavailable");
+      require(red == 99 && ir == 99, "failed burst must never publish a sample");
+      require(Serial.output.find("[I2C] Burst failed") != std::string::npos &&
+              Serial.output.find("rx=") != std::string::npos &&
+              Serial.output.find("SDA=") != std::string::npos,
+              "a full or partial burst failure must preserve transport diagnostics");
     } else if (name == "sos_during_init") {
       Wire.operationMs = 50;
       buttonEdges = {{100, LOW}, {280, HIGH}, {400, LOW}, {580, HIGH}, {700, LOW}, {880, HIGH}};

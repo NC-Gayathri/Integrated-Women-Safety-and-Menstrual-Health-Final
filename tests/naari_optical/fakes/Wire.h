@@ -11,7 +11,7 @@ struct WireFake {
   uint8_t mpuAddress = 0x68;
   bool nonStop = false, absent = false, failReads = false;
   bool failRepeatedStart = false, stuckReset = false, shutdown = false;
-  bool configured = false, shortFifo = false, fifoErrorAfterConsumption = false;
+  bool configured = false, shortFifo = false, shortMetadata = false, fifoErrorAfterConsumption = false;
   bool mpuPresent = false;
   int failWriteReg = -1, mismatchReg = -1, failReadReg = -1;
   int transientWrites = 0, pointerNacks = 0, fifoRequests = 0;
@@ -104,7 +104,14 @@ struct WireFake {
 
     const bool optical = opticalSelected((uint8_t)addr);
     const bool mpu = mpuSelected((uint8_t)addr);
-    const bool failed = (!optical && !mpu) || failReads || pointer == failReadReg ||
+    const bool fifo = optical && ((modeRegister == 0x06 && pointer == 0x05) ||
+                                  (modeRegister == 0x09 && pointer == 0x07));
+    // A normal register burst covers all consecutive addresses, including a
+    // failure at the middle byte. FIFO_DATA uniquely retains its address.
+    const bool registerFailure = failReadReg >= 0 &&
+        (fifo ? pointer == failReadReg :
+            (int)pointer <= failReadReg && failReadReg < (int)pointer + length);
+    const bool failed = (!optical && !mpu) || failReads || registerFailure ||
                         (combined && failRepeatedStart);
     delay(failed ? (failureMs < 0 ? timeoutMs : failureMs) : operationMs);
     if (failed) return 0;
@@ -121,8 +128,6 @@ struct WireFake {
       return length;
     }
 
-    const bool fifo = (modeRegister == 0x06 && pointer == 0x05) ||
-                      (modeRegister == 0x09 && pointer == 0x07);
     if (fifo) ++fifoRequests;
     if (fifo && fifoErrorAfterConsumption && fifoRequests == 1) {
       // ESP32 reports zero on any I2C error, even after hardware consumed bytes.
@@ -130,7 +135,11 @@ struct WireFake {
       ++regs[readPointer];
       return 0;
     }
-    int count = fifo && shortFifo && fifoRequests == 1 ? length - 1 : length;
+    const bool metadata = optical && length == 3 &&
+                          ((modeRegister == 0x06 && pointer == 0x02) ||
+                           (modeRegister == 0x09 && pointer == 0x04));
+    int count = metadata && shortMetadata ? 2 :
+                fifo && shortFifo && fifoRequests == 1 ? length - 1 : length;
     for (int i = 0; i < count; ++i) {
       uint8_t value = regs[uint8_t(pointer + i)];
       if (configured && pointer + i == mismatchReg) value ^= 1;

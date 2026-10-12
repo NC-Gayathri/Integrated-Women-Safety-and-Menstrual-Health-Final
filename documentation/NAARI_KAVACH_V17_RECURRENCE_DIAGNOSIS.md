@@ -40,3 +40,11 @@ The entire fresh startup log with the policy marker and the first `[I2C]` / `[BU
 Relevant authoritative references: [Espressif I²C hardware and pull-up design](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/peripherals/i2c.html), [Arduino Wire endTransmission error codes](https://docs.arduino.cc/language-reference/fun%C3%A7%C3%B5es/communication/wire/endTransmission), [Analog Devices MAX30102 power requirements](https://www.analog.com/en/products/max30102.html).
 
 **Assurance verdict:** firmware fault containment and guard verification can pass CI. Real-world hardware root cause, power quality, long-duration stability, pulse accuracy and end-to-end SOS delivery are **not formally verified** by this work.
+
+## v19 follow-up to the repeated 0x57/0x04 log (12 October 2026)
+
+The trace supplied after the v18 repair again shows `tx=4 rx=-1 SDA=1 SCL=1` at MAX30102 FIFO_WR_PTR (`0x04`), shortly followed by a separate MPU6500 I²C loss and a successful *controller restart*. These are still real failures: restarting an I²C driver cannot repair a voltage/pull-up/wiring fault. The optical trace contains repeated large changes in RED and IR DC values (for example 160k to 106k and 210k to 57k), which causes cautious reacquisition; it does not support emitting fabricated physiological values. The low-g entries are **fall candidates**, not confirmed falls.
+
+The v19 optimization combines the three consecutive optical FIFO metadata register reads into one bounded burst, reducing software-induced shared-bus load. New failed-burst lines include `reg=0x04 len=3` for the MAX30102 (or `reg=0x02 len=3` for MAX30100). It does not prove that the source of `tx=4` was traffic or electrical instability. To isolate the physical cause, collect five minutes of each of ESP32-only, MPU-only, MAX-only and both at the verified module-specific voltage, and confirm real post-flash startup `[I2C_POLICY] contiguous-fifo-metadata-v19-20261012`. Do not change wiring under power and do not disable brownout protection.
+
+Acceptance **still requires** zero I²C errors/restarts during a joint test, sustained plausible accelerometer readings at rest, genuine stable pulse acquisition, and Android notification delivery of test-mode SOS. A passing compile/CI and momentary `SENSOR:READY` are not hardware acceptance.
