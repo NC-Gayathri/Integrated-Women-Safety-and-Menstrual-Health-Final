@@ -98,7 +98,7 @@ class NotificationPolicyTests(unittest.TestCase):
         self.assertIn("$OutputPath", serial)
         self.assertIn("SHARED_I2C_FAULT", serial)
         self.assertIn("PERSISTENT_I2C_FAULT", serial)
-        self.assertIn("SENSOR:.*:(I2C_ERROR|CONFIG_ERROR|NOT_READY|UNKNOWN_PART)", serial)
+        self.assertIn("SENSOR:([^:]+):(I2C_ERROR|CONFIG_ERROR|NOT_READY|UNKNOWN_PART)", serial)
         self.assertIn("exit 4", serial)
         self.assertIn("exit 5", serial)
         self.assertIn("exit 2", serial)
