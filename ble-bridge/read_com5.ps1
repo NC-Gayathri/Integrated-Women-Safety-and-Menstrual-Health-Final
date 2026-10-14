@@ -85,7 +85,7 @@ function Accept-SerialLine {
     # The first actual firmware boot marker begins the acceptance epoch.
     # READY/sample lines from an old session must never count for the new run.
     if (-not $script:markerSeen) { return }
-    if ($Line -match '^\[EVENT\] SENSOR:MAX3010[02]:READY
+    if ($Line -match '^\[EVENT\] SENSOR:MAX3010[02]:READY$') {
         $script:opticalReadySeen = $true
     }
     if ($Line -match '^\[EVENT\] SENSOR:MPU(6050|6500):READY$') {
