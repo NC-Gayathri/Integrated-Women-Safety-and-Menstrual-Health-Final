@@ -159,3 +159,15 @@ that disconnects on impact. An impact sequence must be followed by 600ms
 of continuous near-1g accelerometer data. Run a separate BLE/backend/mobile
 SOS test in a safe test environment with no external emergency side effects.
 Software cannot repair a flaky power rail, jumper or sensor module.
+
+
+## v23 physical acceptance tooling, unchanged v22 firmware (14 October 2026)
+
+The **firmware remains v22**. The new `read_com5.ps1` serial-capture modes
+`-Sensor Mpu`, `-Sensor Optical` and `-Sensor Both` support safe fault
+isolation without demanding READY from deliberately disconnected modules.
+The new `-RequireMeasuredHeartbeat` and `-RequireFallEvent` switches
+require real events, not finger contact or LOW_G_ENTER alone. See
+[v23 isolation and acceptance](../documentation/NAARI_KAVACH_V23_SENSOR_ISOLATION.md).
+No optical-pulse confidence or fall criteria are weakened, and the local SOS
+path is preserved. Actual hardware pass/fail evidence is still required.
