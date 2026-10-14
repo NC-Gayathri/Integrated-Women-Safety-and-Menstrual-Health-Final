@@ -88,3 +88,17 @@ separate **test-mode** SOS exercise, ensure that external emergency side
 effects are disabled; inspect the bridge console for BLE receipt and a
 successful backend response, and inspect the phone separately. Merely seeing
 `[EVENT] SOS` on the ESP32 never proves an alert reached the phone.
+
+
+### v23 physical isolation acceptance (14 October 2026)
+
+The firmware remains v22. The Windows serial checker now accepts `-Sensor Mpu`,
+`-Sensor Optical`, or the default `-Sensor Both` with
+`-RequireTransportStable`. Each selected sensor must have both a READY
+transition and actual serial signal output during the full timed capture.
+Use `-RequireMeasuredHeartbeat` to check for an **actual** numeric heart-rate
+event and `-RequireFallEvent` to check for a **confirmed** fall event.
+Missing sensors in an intentional isolation test are not treated as selected
+module faults, but shared/unknown bus faults still fail. For step-by-step
+powered-off rewiring, single-module commands and safe physical acceptance,
+see [v23 physical isolation](../documentation/NAARI_KAVACH_V23_SENSOR_ISOLATION.md).

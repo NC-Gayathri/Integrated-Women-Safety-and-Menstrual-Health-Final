@@ -8,7 +8,13 @@ param(
 
     [string]$OutputPath,
 
-    [switch]$RequireTransportStable
+    [switch]$RequireTransportStable,
+
+    [ValidateSet('Both', 'Optical', 'Mpu')]
+    [string]$Sensor = 'Both',
+
+    [switch]$RequireMeasuredHeartbeat,
+    [switch]$RequireFallEvent
 )
 
 $ErrorActionPreference = 'Stop'
@@ -22,6 +28,41 @@ $script:opticalReadySeen = $false
 $script:mpuReadySeen = $false
 $script:transportFaults = 0
 $script:opticalSamples = 0
+$script:mpuSamples = 0
+$script:heartRatesObserved = 0
+$script:fallEventsObserved = 0
+$script:latestPulseEvidence = ''
+
+if ($Sensor -eq 'Mpu' -and $RequireMeasuredHeartbeat) {
+    throw 'Heartbeat cannot be required during MPU-only isolation.'
+}
+if ($Sensor -eq 'Optical' -and $RequireFallEvent) {
+    throw 'Fall detection cannot be required during optical-only isolation.'
+}
+
+# Evaluate only selected-device faults. Unknown-address/controller errors
+# fail closed, because they cannot safely be attributed to an unused sensor.
+function Test-RelevantTransportFault {
+    param([string]$Line)
+    if ($Line -match '^\[BUS\] (SHARED_I2C_FAULT|PERSISTENT_I2C_FAULT|LINE_HELD_LOW|CONTROLLER_REINIT|CONTROLLER_RESTORE)') { return $true }
+    if ($Line -match '^\[I2C\]') {
+        if ($Sensor -eq 'Both') { return $true }
+        if ($Line -match 'addr=0x([0-9A-Fa-f]{2})') {
+            $address = [Convert]::ToInt32($Matches[1], 16)
+            if ($Sensor -eq 'Mpu') { return ($address -eq 0x68 -or $address -eq 0x69) }
+            return ($address -eq 0x57)
+        }
+        return $true
+    }
+    if ($Line -match '^\[EVENT\] SENSOR:([^:]+):(I2C_ERROR|CONFIG_ERROR|NOT_READY|UNKNOWN_PART)$') {
+        $device = $Matches[1]
+        if ($Sensor -eq 'Both') { return $true }
+        if ($Sensor -eq 'Mpu') { return $device.StartsWith('MPU') }
+        return $device.StartsWith('MAX')
+    }
+    if ($Line -match '^\[OPTICAL\] FIFO_OVERFLOW') { return ($Sensor -ne 'Mpu') }
+    return $false
+}
 
 # Serial lines, not build output, provide independent evidence of what booted.
 function Accept-SerialLine {
@@ -41,6 +82,9 @@ function Accept-SerialLine {
             Write-Host 'Additional firmware boot detected; possible ESP32 reset.' -ForegroundColor Red
         }
     }
+    # The first actual firmware boot marker begins the acceptance epoch.
+    # READY/sample lines from an old session must never count for the new run.
+    if (-not $script:markerSeen) { return }
     if ($Line -match '^\[EVENT\] SENSOR:MAX3010[02]:READY$') {
         $script:opticalReadySeen = $true
     }
@@ -48,12 +92,14 @@ function Accept-SerialLine {
         $script:mpuReadySeen = $true
     }
     if ($Line -match '^\[SIGNAL\] samples=') { ++$script:opticalSamples }
-    if ($Line -match '^\[I2C\]' -or
-        $Line -match '^\[BUS\] (SHARED_I2C_FAULT|PERSISTENT_I2C_FAULT|LINE_HELD_LOW|CONTROLLER_REINIT|CONTROLLER_RESTORE)' -or
-        $Line -match '^\[EVENT\] SENSOR:.*:(I2C_ERROR|CONFIG_ERROR|NOT_READY|UNKNOWN_PART)$' -or
-        $Line -match '^\[OPTICAL\] FIFO_OVERFLOW') {
-        ++$script:transportFaults
+    if ($Line -match '^\[MPU_SIGNAL\] g=') { ++$script:mpuSamples }
+    if ($Line -match '^\[PULSE_EVIDENCE\]') { $script:latestPulseEvidence = $Line }
+    if ($Line -match '^\[EVENT\] HEART_RATE:([0-9]{2,3})$') {
+        $bpm = [int]$Matches[1]
+        if ($bpm -ge 30 -and $bpm -le 200) { ++$script:heartRatesObserved }
     }
+    if ($Line -eq '[EVENT] FALL_DETECTED') { ++$script:fallEventsObserved }
+    if (Test-RelevantTransportFault -Line $Line) { ++$script:transportFaults }
 }
 
 $ports = @([System.IO.Ports.SerialPort]::GetPortNames())
@@ -118,19 +164,32 @@ if (-not $script:markerSeen) {
 }
 
 Write-Host "Verified physical boot marker: $ExpectedMarker" -ForegroundColor Green
-Write-Host "Observed optical signal reports: $($script:opticalSamples); transport fault lines: $($script:transportFaults)" -ForegroundColor Cyan
+Write-Host "Sensor scope: $Sensor; optical signal lines: $($script:opticalSamples); MPU sample lines: $($script:mpuSamples)" -ForegroundColor Cyan
+Write-Host "Relevant fault lines: $($script:transportFaults); numeric HR events: $($script:heartRatesObserved); confirmed fall events: $($script:fallEventsObserved)" -ForegroundColor Cyan
+if ($script:latestPulseEvidence) { Write-Host "Last pulse evidence: $($script:latestPulseEvidence)" -ForegroundColor Cyan }
 
 if ($RequireTransportStable) {
-    if (-not ($script:opticalReadySeen -and $script:mpuReadySeen)) {
-        Write-Host 'FAIL: both optical and MPU sensor READY transitions were not observed.' -ForegroundColor Red
+    $needOptical = $Sensor -ne 'Mpu'
+    $needMpu = $Sensor -ne 'Optical'
+    if (($needOptical -and (-not $script:opticalReadySeen -or $script:opticalSamples -eq 0)) -or
+        ($needMpu -and (-not $script:mpuReadySeen -or $script:mpuSamples -eq 0))) {
+        Write-Host 'FAIL: selected sensor did not show both READY and live sample evidence.' -ForegroundColor Red
+        Write-Host 'During an optical test, place a finger still to produce a [SIGNAL] line.' -ForegroundColor Yellow
         exit 5
     }
     if ($script:transportFaults -gt 0) {
-        Write-Host 'FAIL: physical I2C/sensor faults occurred. Inspect power, wiring and modules.' -ForegroundColor Red
+        Write-Host 'FAIL: observed selected-sensor or shared-bus faults. Inspect hardware.' -ForegroundColor Red
         exit 4
     }
-    Write-Host 'PASS: no transport faults OBSERVED during the selected capture interval.' -ForegroundColor Green
-    Write-Host 'This is NOT medical BPM verification or BLE/SOS delivery acceptance.' -ForegroundColor Yellow
+    Write-Host 'PASS: selected sensor(s) showed samples with no observed transport faults.' -ForegroundColor Green
 }
-
+if ($RequireMeasuredHeartbeat -and $script:heartRatesObserved -eq 0) {
+    Write-Host 'FAIL: no measured HEART_RATE event; finger detection is not BPM.' -ForegroundColor Red
+    exit 6
+}
+if ($RequireFallEvent -and $script:fallEventsObserved -eq 0) {
+    Write-Host 'FAIL: no confirmed FALL_DETECTED; LOW_G_ENTER is insufficient.' -ForegroundColor Red
+    exit 7
+}
+Write-Host 'Not a medical BPM validation, clinical fall test or phone alert delivery certification.' -ForegroundColor Yellow
 exit 0
