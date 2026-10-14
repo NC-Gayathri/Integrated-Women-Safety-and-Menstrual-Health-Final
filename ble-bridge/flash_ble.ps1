@@ -11,7 +11,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ExpectedMarker = '[CONTACT_POLICY] qualified-contact-v21-20261014'
+$ExpectedMarker = '[EVIDENCE_POLICY] pulse-and-fall-diags-v22-20261014'
 $Fqbn = 'esp32:esp32:esp32doit-devkit-v1'
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $SketchDir = Join-Path $RepoRoot 'esp32-firmware\naari_kavach_dual_sensor_ble_test'
