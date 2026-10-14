@@ -75,6 +75,10 @@ jobs:
             throw 'Physical serial diagnostic PowerShell failed to parse.'
           }
 
+      - name: Verify physical isolation matches actual error codes
+        shell: pwsh
+        run: ./scripts/test_naari_serial_isolation.ps1
+
       - name: Prove cleanup preserves concurrent branch updates
         run: python3 scripts/test_naari_branch_cleanup.py
 
