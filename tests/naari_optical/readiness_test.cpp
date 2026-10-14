@@ -27,7 +27,29 @@ int main(int argc, char** argv) {
   const bool max100 = name.find("100") != std::string::npos;
   Wire.reset(max100 ? 0x11 : 0x15);
   try {
-    if (name == "ready_100" || name == "ready_102") {
+    if (name == "mpu_wake_error4_isolated" || name == "mpu_config_error4_isolated") {
+      require(identifyAndConfigureOptical(), "optical sensor must start healthy");
+      Wire.enableMpu(0x70);
+      Wire.failWriteReg = name == "mpu_wake_error4_isolated" ? 0x6B : 0x1C;
+      Wire.writeFailureCode = 4;
+      Wire.regs[0x04] = 1; // Available optical FIFO frame throughout this fixture.
+      const auto startedAt = millis();
+      buttonEdges = {{startedAt + 100, LOW}, {startedAt + 250, HIGH},
+                     {startedAt + 400, LOW}, {startedAt + 550, HIGH},
+                     {startedAt + 700, LOW}, {startedAt + 850, HIGH}};
+      Serial.output.clear();
+      while (millis() - startedAt < 5000) loop();
+      noMpuReady();
+      require(Serial.output.find("error=4") != std::string::npos,
+              "the reported generic write fault must remain visible");
+      require(opticalReady && opticalSampleCount >= 50 && Wire.busRestarts == 0,
+              "failed MPU setup must not reset a healthy optical sensor or stop its samples");
+      require(Serial.output.find("[EVENT] SOS\n") != std::string::npos,
+              "local SOS must remain available during persistent MPU setup errors");
+      Wire.failWriteReg = -1;
+      delay(2100); loop();
+      require(mpuReady, "MPU may recover only after successful identity and configuration");
+    } else if (name == "ready_100" || name == "ready_102") {
       require(identifyAndConfigureOptical(), "healthy sensor must initialize");
       require(opticalReady, "healthy sensor must be READY");
       require(Serial.output.find(max100 ? "SENSOR:MAX30100:READY" : "SENSOR:MAX30102:READY") != std::string::npos,

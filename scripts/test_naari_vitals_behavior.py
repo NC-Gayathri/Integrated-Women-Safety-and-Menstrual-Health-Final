@@ -7,6 +7,13 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = [
+    'contact_chatter_100', 'contact_chatter_102',
+    'contact_qualification_100', 'contact_qualification_102',
+    'contact_gap_100', 'contact_gap_102',
+    'contact_gap_arrival_100', 'contact_gap_arrival_102',
+    'contact_reset_100', 'contact_reset_102',
+    'contact_clipped_100', 'contact_clipped_102',
+    'contact_remove_reenter_100', 'contact_remove_reenter_102',
     'clean_pulse', 'low_amplitude_pulse', 'weak_contact_noise', 'buffered_pulse', 'too_fast_pulse',
     'early_bpm_is_not_valid', 'bright_flat_ripple_rejected',
     'acquiring_not_reannounced_every_second', 'partial_report_clear_only_on_transition',

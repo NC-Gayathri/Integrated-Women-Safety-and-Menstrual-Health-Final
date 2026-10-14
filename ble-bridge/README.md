@@ -44,9 +44,10 @@ python ble_bridge.py
 
 ## Fail-closed BLE gateway and physical serial verification (12 October 2026)
 
-**The official ESP32 firmware remains v19.** This gateway-side repair does
-**not** claim a newer binary was flashed or that unreliable physical I²C wiring
-can be repaired with software.
+The v20 gateway repair is retained. Current firmware is **v21**, which qualifies
+optical contact before announcing a new finger. See the [v21 repair and physical
+acceptance procedure](../documentation/NAARI_KAVACH_CONTACT_QUALIFICATION_V21.md).
+Repository changes do not establish that the board has been flashed or repaired.
 
 The BLE gateway only subscribes to the exact NAARI service UUID and
 notification-characteristic UUID. Without a successful subscription, it does
@@ -70,7 +71,7 @@ git pull origin master
 .\ble-bridge\read_com5.ps1 -Port COM5 -Seconds 300 -OutputPath .\naari-serial-test.txt -RequireTransportStable
 ```
 
-The last command requires the physical v19 marker, both sensor READY
+The last command requires the physical v21 contact-policy marker, both sensor READY
 transitions and **zero observed I²C/sensor faults** throughout its five-minute
 capture. It returns an error code if a fault occurs, the boot marker is
 missing, or either sensor never becomes ready. It never overwrites an existing

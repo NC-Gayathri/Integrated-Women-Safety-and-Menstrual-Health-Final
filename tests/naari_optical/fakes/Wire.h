@@ -14,6 +14,7 @@ struct WireFake {
   bool configured = false, shortFifo = false, shortMetadata = false, fifoErrorAfterConsumption = false;
   bool mpuPresent = false;
   int failWriteReg = -1, mismatchReg = -1, failReadReg = -1;
+  uint8_t writeFailureCode = 2;
   int transientWrites = 0, pointerNacks = 0, fifoRequests = 0;
   int failureMs = -1; // -1 models a timeout; nonnegative models a fast NACK.
   unsigned int transactions = 0;
@@ -73,7 +74,7 @@ struct WireFake {
       if (pointerNacks > 0) { --pointerNacks; return 2; }
       return 0;
     }
-    if (pointer == failWriteReg || transientWrites-- > 0) return 2;
+    if (pointer == failWriteReg || transientWrites-- > 0) return writeFailureCode;
 
     const uint8_t value = tx[1];
     if (mpu) {

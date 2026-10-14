@@ -108,4 +108,15 @@ The BLE `VITALS:ACQUIRING` notification now clears old published channels only o
 
 At 100 optical samples/second, firmware previously requested the FIFO write-pointer, overflow counter and read-pointer as three separate register reads per optical polling attempt. The MAX30102 maps them at `0x04–0x06` and the MAX30100 at `0x02–0x04`, allowing **one 3-byte sequential register burst** per poll. This reduces optical metadata transactions from three to one, preserving the FIFO sample-transfer path and the existing 10 ms poll limit. A missing/short/mid-burst read fails closed: numeric readings are discarded, the sensor becomes unavailable, and transport diagnostics report the failed register, byte count, TX/RX outcomes and sampled bus pins. The metadata snapshot is read before FIFO consumption, including overflow checks. No I²C errors are ignored and no simulated vitals are supplied.
 
-**New current flash and physical serial acceptance marker:** `[I2C_POLICY] contiguous-fifo-metadata-v19-20261012`. Earlier v13/v16/v17/v18 markers are retained only for historical diagnostics. The Windows `ble-bridge/flash_ble.ps1 -Port COMx` helper refuses stale firmware source or binaries and requires a fresh physical boot with the v19 marker. This code optimization cannot fix damaged wires, incompatible I²C pull-ups, a marginal sensor module or fluctuating power: when both sensors emit `I2C_ERROR`, perform the [v17 electrical isolation procedure](../documentation/NAARI_KAVACH_V17_RECURRENCE_DIAGNOSIS.md), first with individual sensors and then together. The `[SIGNAL] reason=ACQUIRING` state means no sufficiently consistent peaks are available; it is **not** evidence that the sensor has measured valid BPM/SpO₂.
+**v19 historical flash and physical serial acceptance marker:** `[I2C_POLICY] contiguous-fifo-metadata-v19-20261012`. Earlier v13/v16/v17/v18 markers are retained only for historical diagnostics. The v19 release introduced this marker for the Windows flash helper. Current helpers require the newer v21 contact-policy marker described below. This code optimization cannot fix damaged wires, incompatible I²C pull-ups, a marginal sensor module or fluctuating power: when both sensors emit `I2C_ERROR`, perform the [v17 electrical isolation procedure](../documentation/NAARI_KAVACH_V17_RECURRENCE_DIAGNOSIS.md), first with individual sensors and then together. The `[SIGNAL] reason=ACQUIRING` state means no sufficiently consistent peaks are available; it is **not** evidence that the sensor has measured valid BPM/SpO₂.
+
+## v21 — qualified optical contact (14 October 2026)
+
+Current flash and physical serial acceptance marker:
+`[CONTACT_POLICY] qualified-contact-v21-20261014`. Both Windows helpers require
+this newest marker; the earlier boot policy lines remain for traceability.
+New contact requires 20 consecutive 100 Hz frames with RED at least 5,000 and
+IR at least 10,000. The lower removal thresholds still clear values immediately.
+This prevents weak light near IR 3,000 from repeatedly declaring/removing a
+finger. Strong contact must still pass settling and the existing pulse gates.
+See [v21 evidence and physical acceptance](../documentation/NAARI_KAVACH_CONTACT_QUALIFICATION_V21.md).

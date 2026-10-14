@@ -108,6 +108,9 @@ uint8_t lastReportedVitalsMask = 0;
 // (RED ~= 10k, IR ~= 20k) while rejecting the physical 3-5k weak-contact region.
 #define OPTICAL_VITAL_MIN_RED_DC 5000.0
 #define OPTICAL_VITAL_MIN_IR_DC 10000.0
+#define OPTICAL_CONTACT_SAMPLES 20 // 200 ms of the verified 100 Hz sample stream.
+#define OPTICAL_CONTACT_EXIT_RED 1000
+#define OPTICAL_CONTACT_EXIT_IR 3000
 #define OPTICAL_MIN_IR_ENVELOPE 10.0
 #define OPTICAL_MIN_IR_AC_FRACTION 0.0004
 #define HEART_MIN_CONSISTENT_INTERVALS 3
@@ -612,6 +615,7 @@ double irSqSum = 0.0;
 float latestSpo2 = 0.0f;
 bool spo2Valid = false;
 bool fingerPresent = false;
+uint8_t opticalContactSamples = 0;
 bool peakArmed = false;
 bool opticalSampleSeen = false;
 bool opticalClipped = false;
@@ -655,6 +659,7 @@ void resetVitalsState() {
   previousIrAc = 0.0;
   previousSlopePositive = false;
   fingerPresent = false;
+  opticalContactSamples = 0;
   opticalSampleSeen = false;
   opticalClipped = false;
   lastRedRaw = lastIrRaw = 0;
@@ -1048,8 +1053,14 @@ bool readMax30102Sample(uint32_t& red, uint32_t& ir) {
 void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
   const unsigned long receivedAt = millis();
   if (opticalSampleSeen && receivedAt - lastOpticalSampleAt > OPTICAL_SAMPLE_MAX_AGE_MS) {
+    const bool contactTimedOut = fingerPresent;
     invalidateVitalEstimates();
     fingerPresent = false;
+    opticalContactSamples = 0;
+    if (contactTimedOut) {
+      Serial.println("[FINGER] REMOVED (sample timeout)");
+      sendBleEvent("VITALS:NO_VALID_READING");
+    }
   }
   lastOpticalSampleAt = receivedAt;
   opticalSampleSeen = true;
@@ -1061,10 +1072,23 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
   const uint32_t fullScale = opticalChip == OPTICAL_MAX30100 ? 0xFFFF : 0x3FFFF;
   opticalClipped = redRaw >= fullScale || irRaw >= fullScale;
   const bool hadContact = fingerPresent;
-  // Light level is a contact heuristic, not proof of a pulse. An AC trough
-  // between beats must not erase beat history. Raw light detects removal
-  // immediately instead of waiting for the slow DC baseline to decay.
-  fingerPresent = !opticalClipped && irRaw > 3000 && redRaw > 1000;
+  // Entry and exit deliberately differ. Noise around the old 3000-IR boundary
+  // must not announce a new finger on every crossing. Require 20 consecutive
+  // frames at the existing numeric-quality floors before starting acquisition.
+  // Once qualified, retain contact above the original exit floors, but keep
+  // all numeric quality/settling gates below. Removal/clipping clears immediately.
+  const bool aboveExit = !opticalClipped &&
+      irRaw > OPTICAL_CONTACT_EXIT_IR && redRaw > OPTICAL_CONTACT_EXIT_RED;
+  if (hadContact) {
+    fingerPresent = aboveExit;
+    opticalContactSamples = 0;
+  } else {
+    const bool entrySample = aboveExit && redRaw >= OPTICAL_VITAL_MIN_RED_DC &&
+        irRaw >= OPTICAL_VITAL_MIN_IR_DC;
+    opticalContactSamples = entrySample ? opticalContactSamples + 1 : 0;
+    fingerPresent = opticalContactSamples >= OPTICAL_CONTACT_SAMPLES;
+    if (fingerPresent) opticalContactSamples = 0;
+  }
   if (!fingerPresent) {
     invalidateVitalEstimates();
     opticalSettlingSamples = 0;
@@ -1250,7 +1274,13 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
 const char* opticalSignalReason() {
   if (!opticalSampleSeen || millis() - lastOpticalSampleAt > OPTICAL_SAMPLE_MAX_AGE_MS) return "NO_SAMPLES";
   if (opticalClipped) return "SATURATED";
-  if (!fingerPresent) return "LOW_LIGHT";
+  if (!fingerPresent) {
+    if (opticalContactSamples > 0) return "CONTACT_PENDING";
+    if (lastRedRaw > OPTICAL_CONTACT_EXIT_RED && lastIrRaw > OPTICAL_CONTACT_EXIT_IR) {
+      return "WEAK_CONTACT";
+    }
+    return "LOW_LIGHT";
+  }
   if (opticalSettlingSamples > 0) return "SETTLING";
   if (redDc < OPTICAL_VITAL_MIN_RED_DC || irDc < OPTICAL_VITAL_MIN_IR_DC) return "WEAK_CONTACT";
   if (heartRateValid && spo2Valid) return "VALID";
@@ -1319,6 +1349,7 @@ void updateOpticalSensor() {
     const bool hadValidEstimate = heartRateValid || spo2Valid;
     invalidateVitalEstimates();
     fingerPresent = false;
+    opticalContactSamples = 0;
     opticalSettlingSamples = 0;
 
     // A sample stream disappearing while a finger was present is a real
@@ -1439,6 +1470,7 @@ void setup() {
   Serial.println("[BUS_POLICY] failclosed-recurrence-v17-20261011");
   Serial.println("[FIFO_POLICY] optical-poll-vitals-v18-20261011");
   Serial.println("[I2C_POLICY] contiguous-fifo-metadata-v19-20261012");
+  Serial.println("[CONTACT_POLICY] qualified-contact-v21-20261014");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
