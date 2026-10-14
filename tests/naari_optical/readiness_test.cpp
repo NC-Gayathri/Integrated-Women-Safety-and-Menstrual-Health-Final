@@ -257,6 +257,8 @@ int main(int argc, char** argv) {
       for (int i = 0; i < 34; ++i) accel(0, 0, 0x10);
       require(Serial.output.find("[EVENT] FALL_DETECTED") != std::string::npos,
               "a coherent single-axis drop must issue FALL_DETECTED");
+      require(Serial.output.find("[FALL] IMPACT") != std::string::npos,
+              "a real witnessed impact is necessary before an alert");
     } else if (name == "mpu_controlled_short_2g_drop" ||
                name == "mpu_one_low_g_sample_rejected" ||
                name == "mpu_postimpact_not_stable_rejected") {
@@ -400,6 +402,8 @@ int main(int argc, char** argv) {
       for (int i = 0; i < (name == "mpu_fault_discards_fall" ? 1 : 3); ++i) {
         delay(21); updateMpuFallDetection();
       }
+      require(Serial.output.find("[FALL] ABORTED: missing MPU sample; no confirmed impact/stillness.") != std::string::npos,
+              "a broken I2C motion transfer must explicitly mark the pending fall as unconfirmed");
       Wire.failReadReg = -1;
       Wire.mpuRegs[0x3B] = Wire.mpuRegs[0x3D] = 0;
       Wire.mpuRegs[0x3F] = 0x10;

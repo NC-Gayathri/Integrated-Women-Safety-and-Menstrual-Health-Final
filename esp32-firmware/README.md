@@ -120,3 +120,42 @@ IR at least 10,000. The lower removal thresholds still clear values immediately.
 This prevents weak light near IR 3,000 from repeatedly declaring/removing a
 finger. Strong contact must still pass settling and the existing pulse gates.
 See [v21 evidence and physical acceptance](../documentation/NAARI_KAVACH_CONTACT_QUALIFICATION_V21.md).
+
+
+## v22 — Explain absent heart rate and unconfirmed fall events (14 October 2026)
+
+The current physical build marker is
+`[EVIDENCE_POLICY] pulse-and-fall-diags-v22-20261014`. The verified
+flash and serial-capture helpers both require that exact marker, while all
+earlier v21 contact qualification, SOS behavior, pulse confidence rules, and
+fall criteria remain **unchanged**.
+
+When the optical sensor sees a finger but cannot confidently measure its
+pulse, the ordinary `[SIGNAL] reason=ACQUIRING` line is accompanied by a
+serial-only `[PULSE_EVIDENCE]` line showing the number of detected peak
+candidates, accepted beat intervals, out-of-range intervals, irregular
+intervals, baseline rebases and current interval confidence. If `peaks=0`
+there are no qualified peaks in this optical session; if the rejected counts
+grow, movement/noise or irregular waveforms are preventing acceptance. Many
+`rebase` events point to shifts larger than 10% of the running optical
+baseline. These are diagnostic evidence, **not** medical proof, not simulated
+heartbeats and not a claim that every finger placement must produce BPM.
+
+The motion sensor emits a compact `[MPU_SIGNAL]` acceleration magnitude and
+state every two seconds while reads are healthy. If a pending low-g or
+post-impact sequence is interrupted by I2C failure, the firmware explicitly
+prints `[FALL] ABORTED: missing MPU sample; no confirmed impact/stillness.`
+There is no `FALL_DETECTED` unless actual continuous low-g, impact and
+near-1g stability have all been sampled. Both an MPU6050 (`WHO_AM_I=0x68`)
+and an MPU6500 (`WHO_AM_I=0x70`) remain supported.
+
+**Physical acceptance is still required.** Turn off board power before
+reworking wires. First get both sensors `READY` without `[I2C] ... tx=4`
+faults for five minutes. Then hold a finger steadily on both MAX30102
+windows and look for `[PULSE_EVIDENCE]`, followed by a *measured*
+`HEART_RATE:` if the optical pulsations are stable. For the motion sensor,
+use a secured, padded and powered assembly, not a loose breadboard sensor
+that disconnects on impact. An impact sequence must be followed by 600ms
+of continuous near-1g accelerometer data. Run a separate BLE/backend/mobile
+SOS test in a safe test environment with no external emergency side effects.
+Software cannot repair a flaky power rail, jumper or sensor module.

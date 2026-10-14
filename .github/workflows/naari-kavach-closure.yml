@@ -114,6 +114,7 @@ jobs:
           grep -Fq '[I2C_POLICY] contiguous-fifo-metadata-v19-20261012' "$F"
 
           grep -Fq '[CONTACT_POLICY] qualified-contact-v21-20261014' "$F"
+          grep -Fq '[EVIDENCE_POLICY] pulse-and-fall-diags-v22-20261014' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"

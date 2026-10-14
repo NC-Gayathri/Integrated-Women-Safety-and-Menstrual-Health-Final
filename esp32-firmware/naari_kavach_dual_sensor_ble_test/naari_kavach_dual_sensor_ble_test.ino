@@ -338,6 +338,7 @@ bool mpuReady = false;
 unsigned long lastMpuSample = 0;
 unsigned long lastMpuRetry = 0;
 uint8_t mpuConsecutiveErrors = 0;
+unsigned long lastMpuEvidenceAt = 0; // Only print live fall evidence every two seconds.
 
 const char* mpuChipNameForIdentity(uint8_t whoAmI) {
   if (whoAmI == MPU6050_WHO_AM_I) return "MPU6050";
@@ -433,6 +434,7 @@ bool initializeMpuAt(uint8_t addr) {
   mpuReady = true;
   mpuConsecutiveErrors = 0;
   mpuFaultObserved = false;
+  lastMpuEvidenceAt = millis();
   fallState = FALL_IDLE;
   stationaryStartedAt = 0;
 
@@ -470,6 +472,11 @@ void updateMpuFallDetection() {
 
   uint8_t raw[6];
   if (!readBytes(mpuAddr, MPU_REG_ACCEL_XOUT_H, raw, sizeof(raw))) {
+    if (fallState != FALL_IDLE) {
+      // An unplugged or intermittently disconnected sensor cannot prove
+      // that the expected impact/stillness occurred. Do not create a fall.
+      Serial.println("[FALL] ABORTED: missing MPU sample; no confirmed impact/stillness.");
+    }
     // Missing motion samples break the free-fall/impact/stationary sequence.
     // Never finish a pre-fault sequence with post-recovery acceleration.
     fallState = FALL_IDLE;
@@ -505,6 +512,17 @@ void updateMpuFallDetection() {
   const float ay = ayRaw / MPU_ACCEL_LSB_PER_G;
   const float az = azRaw / MPU_ACCEL_LSB_PER_G;
   const float magnitude = sqrtf(ax * ax + ay * ay + az * az);
+
+  // Lightweight serial-only evidence: a local SOS still works when the MPU
+  // fails. Printing every 2s is much cheaper than logging each 100Hz sample.
+  // LOW_G_ENTER alone is not a fall, and a missing sample is not an impact.
+  if (now - lastMpuEvidenceAt >= 2000) {
+    lastMpuEvidenceAt = now;
+    const char* phase = fallState == FALL_FREE_FALL ? "LOW_G" :
+                        fallState == FALL_IMPACT ? "POST_IMPACT" : "IDLE";
+    Serial.printf("[MPU_SIGNAL] g=%.2f phase=%s failures=%u\n",
+                  magnitude, phase, (unsigned int)mpuConsecutiveErrors);
+  }
 
   if (hasFallTriggered && now - lastFallTriggeredAt < FALL_COOLDOWN_MS) {
     fallState = FALL_IDLE;
@@ -625,6 +643,22 @@ unsigned long opticalSampleTimeMs = 0;
 unsigned long opticalSampleCount = 0;
 uint16_t opticalSettlingSamples = 0;
 
+// These counters explain ACQUIRING without pretending motion noise is a BPM.
+// They are serial diagnostics, not alternate pathways for valid vitals.
+uint32_t pulsePeakCandidates = 0;
+uint32_t pulseIntervalsAccepted = 0;
+uint32_t pulseIntervalsOutOfRange = 0;
+uint32_t pulseIntervalsInconsistent = 0;
+uint32_t pulseBaselineRebases = 0;
+
+void resetPulseEvidence() {
+  pulsePeakCandidates = 0;
+  pulseIntervalsAccepted = 0;
+  pulseIntervalsOutOfRange = 0;
+  pulseIntervalsInconsistent = 0;
+  pulseBaselineRebases = 0;
+}
+
 const char* opticalChipName() {
   switch (opticalChip) {
     case OPTICAL_MAX30100: return "MAX30100";
@@ -665,6 +699,7 @@ void resetVitalsState() {
   lastRedRaw = lastIrRaw = 0;
   opticalSampleTimeMs = opticalSampleCount = 0;
   opticalSettlingSamples = 0;
+  resetPulseEvidence();
 }
 
 void noteSensorTransportFault(bool optical) {
@@ -1105,6 +1140,7 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
   }
 
   if (!hadContact) {
+    resetPulseEvidence(); // Start a new evidence window for this exact contact.
     Serial.println("[FINGER] DETECTED");
     sendBleEvent("VITALS:ACQUIRING");
   }
@@ -1115,6 +1151,7 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
       (fabs((double)redRaw - redDc) > redDc * 0.10 ||
        fabs((double)irRaw - irDc) > irDc * 0.10);
   if (!hadContact || levelChanged) {
+    if (levelChanged) ++pulseBaselineRebases;
     const bool hadValidEstimate = heartRateValid || spo2Valid;
     invalidateVitalEstimates();
     irDc = irRaw;
@@ -1185,12 +1222,14 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
 
   if (peakArmed && previousSlopePositive && !slopePositive &&
       previousIrAc > peakThreshold) {
+    ++pulsePeakCandidates;
     peakArmed = false; // A single positive half-wave yields at most one peak.
     if (lastPeakAt == 0) {
       lastPeakAt = now; // No heart-rate result from a single peak.
     } else {
       const unsigned long interval = now - lastPeakAt;
       if (interval < 300 || interval > 2000) {
+        ++pulseIntervalsOutOfRange;
         // Reject too-fast periods instead of aliasing skipped 240-BPM peaks.
         const bool hadValidEstimate = heartRateValid || spo2Valid;
         invalidateVitalEstimates();
@@ -1200,6 +1239,7 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
         if (consistentBeatIntervals > 0 &&
             fabsf(observedBpm - candidateBpm) >
                 candidateBpm * HEART_MAX_BEAT_DEVIATION) {
+          ++pulseIntervalsInconsistent;
           const bool hadValidEstimate = heartRateValid || spo2Valid;
           heartRateValid = false;
           spo2Valid = false;
@@ -1208,6 +1248,7 @@ void processOpticalSample(uint32_t redRaw, uint32_t irRaw) {
           filteredBpm = 0.0f;
           if (hadValidEstimate) sendBleEvent("VITALS:ACQUIRING");
         } else {
+          ++pulseIntervalsAccepted;
           candidateBpm = consistentBeatIntervals == 0 ? observedBpm :
               0.75f * candidateBpm + 0.25f * observedBpm;
           if (consistentBeatIntervals < HEART_MIN_CONSISTENT_INTERVALS) {
@@ -1293,6 +1334,19 @@ void reportOpticalSignal() {
   Serial.printf("[SIGNAL] samples=%lu red=%lu ir=%lu red_dc=%.1f ir_dc=%.1f ir_ac=%.1f age_ms=%lu reason=%s\n",
                 opticalSampleCount, (unsigned long)lastRedRaw, (unsigned long)lastIrRaw,
                 redDc, irDc, irEnvelope, millis() - lastOpticalSampleAt, opticalSignalReason());
+  // Presence of a finger or strong DC light is not proof of a physiological
+  // beat. These statistics distinguish missing/irregular peaks from repeated
+  // baseline rebases while keeping the original validation rules intact.
+  if (fingerPresent) {
+    Serial.printf("[PULSE_EVIDENCE] peaks=%lu accepted=%lu out_of_range=%lu irregular=%lu rebase=%lu confidence=%u/%u\n",
+                  (unsigned long)pulsePeakCandidates,
+                  (unsigned long)pulseIntervalsAccepted,
+                  (unsigned long)pulseIntervalsOutOfRange,
+                  (unsigned long)pulseIntervalsInconsistent,
+                  (unsigned long)pulseBaselineRebases,
+                  (unsigned int)consistentBeatIntervals,
+                  (unsigned int)HEART_MIN_CONSISTENT_INTERVALS);
+  }
 }
 
 void updateOpticalSensor() {
@@ -1471,6 +1525,7 @@ void setup() {
   Serial.println("[FIFO_POLICY] optical-poll-vitals-v18-20261011");
   Serial.println("[I2C_POLICY] contiguous-fifo-metadata-v19-20261012");
   Serial.println("[CONTACT_POLICY] qualified-contact-v21-20261014");
+  Serial.println("[EVIDENCE_POLICY] pulse-and-fall-diags-v22-20261014");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);

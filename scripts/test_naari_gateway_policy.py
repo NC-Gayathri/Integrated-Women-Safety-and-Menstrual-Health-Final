@@ -81,9 +81,9 @@ class NotificationPolicyTests(unittest.TestCase):
         self.assertIn("heartbeat_task.cancel()", bridge)
         self.assertIn("gateway_vitals.clear()", bridge)
 
-    def test_serial_script_requires_v21_and_rejects_faults(self):
+    def test_serial_script_requires_v22_and_rejects_faults(self):
         serial = (ROOT / "ble-bridge/read_com5.ps1").read_text()
-        self.assertIn("[CONTACT_POLICY] qualified-contact-v21-20261014", serial)
+        self.assertIn("[EVIDENCE_POLICY] pulse-and-fall-diags-v22-20261014", serial)
         self.assertNotIn("single-axis-fall-v10", serial)
         self.assertIn("[ValidateRange(3, 900)]", serial)
         self.assertIn("$RequireTransportStable", serial)

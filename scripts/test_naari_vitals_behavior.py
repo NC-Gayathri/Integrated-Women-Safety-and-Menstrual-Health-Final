@@ -7,6 +7,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = [
+    'pulse_evidence_clean_100', 'pulse_evidence_clean_102',
+    'pulse_evidence_fast_100', 'pulse_evidence_fast_102',
     'contact_chatter_100', 'contact_chatter_102',
     'contact_qualification_100', 'contact_qualification_102',
     'contact_gap_100', 'contact_gap_102',
