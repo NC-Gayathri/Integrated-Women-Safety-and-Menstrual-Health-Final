@@ -91,6 +91,9 @@ class NotificationPolicyTests(unittest.TestCase):
         self.assertIn("$RequireMeasuredHeartbeat", serial)
         self.assertIn("$RequireFallEvent", serial)
         self.assertIn("Test-RelevantTransportFault -Line $Line", serial)
+        self.assertEqual(serial.count("function Accept-SerialLine"), 1)
+        self.assertEqual(serial.count("$ports = @([System.IO.Ports.SerialPort]::GetPortNames())"), 1)
+        self.assertTrue(serial.rstrip().endswith("exit 0"))
         self.assertIn("if (-not $script:markerSeen) { return }", serial)
         self.assertLess(serial.index("if (-not $script:markerSeen) { return }"),
                         serial.index("if ($Line -match '^\\[EVENT\\] SENSOR:MAX3010"))
