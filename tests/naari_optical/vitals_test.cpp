@@ -59,7 +59,38 @@ int main(int argc, char** argv) {
   try {
     require(identifyAndConfigureOptical(), "fixture sensor must initialize");
     Serial.output.clear();
-    if (name.rfind("contact_chatter_", 0) == 0) {
+    if (name == "pulse_evidence_clean_100" || name == "pulse_evidence_clean_102") {
+      pulse();
+      require(heartRateValid && pulsePeakCandidates >= 4 &&
+              pulseIntervalsAccepted >= HEART_MIN_CONSISTENT_INTERVALS &&
+              pulseIntervalsOutOfRange == 0 && pulseIntervalsInconsistent == 0,
+              "a clean real-sample waveform must retain confident pulse evidence");
+      Serial.output.clear();
+      reportOpticalSignal();
+      require(Serial.output.find("[PULSE_EVIDENCE] peaks=") != std::string::npos &&
+              Serial.output.find("confidence=3/3") != std::string::npos,
+              "the physical serial diagnostic must expose accepted peak evidence");
+      // Starting a new optical session may not inherit the previous pulse.
+      resetVitalsState();
+      require(!heartRateValid && pulsePeakCandidates == 0 &&
+              pulseIntervalsAccepted == 0 && pulseBaselineRebases == 0,
+              "reset must discard optical evidence rather than make stale BPM");
+    } else if (name == "pulse_evidence_fast_100" || name == "pulse_evidence_fast_102") {
+      // A 25-frame optical ripple is 240/min, too fast for this prototype.
+      pulse(1300, 25);
+      require(!heartRateValid && pulseIntervalsOutOfRange > 0,
+              "too-fast raw peaks must be rejected, not displayed as heartbeat");
+      Serial.output.clear();
+      reportOpticalSignal();
+      require(Serial.output.find("out_of_range=") != std::string::npos,
+              "out-of-range pulse evidence must be visible to diagnose ACQUIRING");
+      // Gross placement jump must not fabricate a new validated interval.
+      const auto before = pulseBaselineRebases;
+      delay(10);
+      processOpticalSample(60000, 61000);
+      require(pulseBaselineRebases > before && !heartRateValid,
+              "large finger-position shift must rebase and invalidate BPM");
+    } else if (name.rfind("contact_chatter_", 0) == 0) {
       // User's 14 Oct trace crosses the old 3000 IR boundary repeatedly.
       // This is a constructed boundary sequence, not a recorded 100 Hz waveform.
       const uint32_t ir[] = {3020, 2980, 3141, 2900, 3837, 2999, 4434, 2800};
