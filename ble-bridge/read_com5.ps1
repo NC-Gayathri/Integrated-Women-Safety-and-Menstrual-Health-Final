@@ -54,7 +54,17 @@ function Test-RelevantTransportFault {
         }
         return $true
     }
-    if ($Line -match '^\[EVENT\] SENSOR:([^:]+):(I2C_ERROR|CONFIG_ERROR|NOT_READY|UNKNOWN_PART)
+    if ($Line -match '^\[EVENT\] SENSOR:([^:]+):(I2C_ERROR|CONFIG_ERROR|NOT_READY|UNKNOWN_PART)$') {
+        $device = $Matches[1]
+        if ($Sensor -eq 'Both') { return $true }
+        if ($Sensor -eq 'Mpu') { return $device.StartsWith('MPU') }
+        return $device.StartsWith('MAX')
+    }
+    if ($Line -match '^\[OPTICAL\] FIFO_OVERFLOW') { return ($Sensor -ne 'Mpu') }
+    return $false
+}
+
+# Serial lines, not build output, provide independent evidence of what booted.
 function Accept-SerialLine {
     param([string]$Line)
     Write-Host "[ESP32 SERIAL] $Line"
