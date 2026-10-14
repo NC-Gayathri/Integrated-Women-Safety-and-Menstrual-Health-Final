@@ -113,6 +113,8 @@ jobs:
           grep -Fq '[FIFO_POLICY] optical-poll-vitals-v18-20261011' "$F"
           grep -Fq '[I2C_POLICY] contiguous-fifo-metadata-v19-20261012' "$F"
 
+          grep -Fq '[CONTACT_POLICY] qualified-contact-v21-20261014' "$F"
+
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"
           grep -Fq "sUuid !== this.targetServiceUUID" "$B"

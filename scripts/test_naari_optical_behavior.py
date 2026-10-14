@@ -11,6 +11,7 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = [
+    'mpu_wake_error4_isolated', 'mpu_config_error4_isolated',
     'ready_100', 'ready_102', 'deferred_read_failure', 'transient_write',
     'absent', 'unreadable_identity', 'unknown', 'reset_timeout_100',
     'reset_timeout_102', 'write_failure_100', 'write_failure_102',

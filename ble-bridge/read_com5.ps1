@@ -12,7 +12,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ExpectedMarker = '[I2C_POLICY] contiguous-fifo-metadata-v19-20261012'
+$ExpectedMarker = '[CONTACT_POLICY] qualified-contact-v21-20261014'
 $serial = $null
 $writer = $null
 $script:markerSeen = $false
@@ -31,10 +31,10 @@ function Accept-SerialLine {
     if ($Line -eq $ExpectedMarker) {
         ++$script:bootMarkerCount
         if ($script:bootMarkerCount -eq 1) {
-            # Measure the ENTIRE requested duration only after real v19 boot.
+            # Measure the ENTIRE requested duration only after real v21 boot.
             $script:markerSeen = $true
             $script:observationUntil = (Get-Date).AddSeconds($Seconds)
-            Write-Host "v19 boot detected; now recording a full $Seconds-second interval." -ForegroundColor Cyan
+            Write-Host "v21 boot detected; now recording a full $Seconds-second interval." -ForegroundColor Cyan
         } else {
             # An unsolicited new setup banner invalidates a stability run.
             ++$script:transportFaults
@@ -113,7 +113,7 @@ try {
 
 if (-not $script:markerSeen) {
     Write-Host "Expected physical boot marker was not observed: $ExpectedMarker" -ForegroundColor Red
-    Write-Host 'Do not claim the verified v19 firmware is running on this ESP32.' -ForegroundColor Yellow
+    Write-Host 'Do not claim the verified v21 firmware is running on this ESP32.' -ForegroundColor Yellow
     exit 2
 }
 

@@ -59,7 +59,85 @@ int main(int argc, char** argv) {
   try {
     require(identifyAndConfigureOptical(), "fixture sensor must initialize");
     Serial.output.clear();
-    if (name == "clean_pulse") {
+    if (name.rfind("contact_chatter_", 0) == 0) {
+      // User's 14 Oct trace crosses the old 3000 IR boundary repeatedly.
+      // This is a constructed boundary sequence, not a recorded 100 Hz waveform.
+      const uint32_t ir[] = {3020, 2980, 3141, 2900, 3837, 2999, 4434, 2800};
+      for (int i = 0; i < 800; ++i) {
+        delay(10); processOpticalSample(3500, ir[i % 8]);
+      }
+      require(!fingerPresent && Serial.output.find("[FINGER]") == std::string::npos &&
+              Serial.output.find("[EVENT] VITALS:") == std::string::npos,
+              "weak boundary noise must not announce repeated finger placement/removal");
+      noNumbers();
+    } else if (name.rfind("contact_qualification_", 0) == 0) {
+      // Nineteen strong frames, one weak frame, then a new complete 20-frame run.
+      for (int i = 0; i < 19; ++i) {
+        delay(10); processOpticalSample(10000, 20000);
+      }
+      require(!fingerPresent && Serial.output.empty(), "a brief bright excursion is not contact");
+      delay(10); processOpticalSample(3500, 3900);
+      for (int i = 0; i < 19; ++i) {
+        delay(10); processOpticalSample(10000, 20000);
+      }
+      require(!fingerPresent && Serial.output.empty(), "weak frames must break entry qualification");
+      delay(10); processOpticalSample(10000, 20000);
+      require(fingerPresent && occurrences(Serial.output, "[FINGER] DETECTED") == 1 &&
+              occurrences(Serial.output, "[EVENT] VITALS:ACQUIRING") == 1,
+              "sustained strong contact must announce exactly once after qualification");
+      pulse();
+      require(heartRateValid && spo2Valid, "qualified contact must still acquire real pulse fixtures");
+    } else if ((name == "contact_gap_100" || name == "contact_gap_102") ||
+               name.rfind("contact_reset_", 0) == 0 ||
+               name.rfind("contact_clipped_", 0) == 0) {
+      for (int i = 0; i < 19; ++i) {
+        delay(10); processOpticalSample(10000, 20000);
+      }
+      if ((name == "contact_gap_100" || name == "contact_gap_102")) {
+        delay(600);
+        updateOpticalSensor(); // Expiry also has to discard unconfirmed contact.
+      } else if (name.rfind("contact_reset_", 0) == 0) {
+        markOpticalI2cFailure("test transport boundary");
+        require(identifyAndConfigureOptical(), "fixture transport must recover");
+      } else {
+        delay(10); processOpticalSample(max100 ? 65535 : 262143, 20000);
+      }
+      Serial.output.clear();
+      for (int i = 0; i < 19; ++i) {
+        delay(10); processOpticalSample(10000, 20000);
+      }
+      require(!fingerPresent && Serial.output.empty(),
+              "expired, clipped or reset samples must not contribute to new contact");
+      delay(10); processOpticalSample(10000, 20000);
+      require(fingerPresent, "fresh complete contact must recover after interruption");
+    } else if (name.rfind("contact_gap_arrival_", 0) == 0) {
+      pulse(); require(heartRateValid && spo2Valid, "established values required");
+      Serial.output.clear();
+      // A new FIFO frame can arrive before updateOpticalSensor sees the gap.
+      delay(600); processOpticalSample(10000, 20000);
+      noNumbers();
+      require(!fingerPresent && occurrences(Serial.output, "VITALS:NO_VALID_READING") == 1,
+              "a late frame must clear old published vitals before qualifying a new contact");
+      require(occurrences(Serial.output, "[FINGER] DETECTED") == 0,
+              "a late frame must not skip fresh contact qualification");
+    } else if (name.rfind("contact_remove_reenter_", 0) == 0) {
+      pulse(); require(heartRateValid && spo2Valid, "established values required");
+      Serial.output.clear();
+      delay(10); processOpticalSample(3500, 2999);
+      noNumbers();
+      require(!fingerPresent && occurrences(Serial.output, "VITALS:NO_VALID_READING") == 1,
+              "a removal sample must clear published values immediately");
+      for (int i = 0; i < 200; ++i) {
+        delay(10); processOpticalSample(3500, i % 2 ? 3900 : 2999);
+      }
+      require(occurrences(Serial.output, "[FINGER] REMOVED") == 1 &&
+              occurrences(Serial.output, "[FINGER] DETECTED") == 0,
+              "weak rebound after removal must not retrigger contact");
+      pulse();
+      require(heartRateValid && spo2Valid &&
+              occurrences(Serial.output, "[FINGER] DETECTED") == 1,
+              "strong reapplication must recover normally without stale history");
+    } else if (name == "clean_pulse") {
       pulse();
       require(heartRateValid && filteredBpm >= 59 && filteredBpm <= 61,
               "clean 100-frame pulse must acquire 60 BPM");
@@ -188,7 +266,8 @@ int main(int argc, char** argv) {
               "a small pulse at the capture's high baseline must remain detectable");
     } else if (name == "settling_report") {
       Serial.output.clear();
-      delay(10); processOpticalSample(200000, 240000);
+      // Qualify contact before exercising the independent settling state.
+      for (int i = 0; i < 20; ++i) { delay(10); processOpticalSample(200000, 240000); }
       require(Serial.output.find("[FINGER] DETECTED") != std::string::npos &&
               Serial.output.find("[EVENT] VITALS:ACQUIRING") != std::string::npos,
               "new contact must announce one acquisition transition");
@@ -198,7 +277,7 @@ int main(int argc, char** argv) {
               Serial.output.find("[EVENT] VITALS:ACQUIRING") == std::string::npos,
               "settling diagnostics may print while contact exists but must not repeat BLE ACQUIRING");
     } else if (name == "settling_samples_expired") {
-      delay(10); processOpticalSample(200000, 240000);
+      for (int i = 0; i < 20; ++i) { delay(10); processOpticalSample(200000, 240000); }
       delay(600); report(); noNumbers();
       require(std::string(opticalSignalReason()) == "NO_SAMPLES" &&
               Serial.output.find("[FINGER] REMOVED (sample timeout)") != std::string::npos &&
