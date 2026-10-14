@@ -91,6 +91,9 @@ class NotificationPolicyTests(unittest.TestCase):
         self.assertIn("$RequireMeasuredHeartbeat", serial)
         self.assertIn("$RequireFallEvent", serial)
         self.assertIn("Test-RelevantTransportFault -Line $Line", serial)
+        self.assertIn("if (-not $script:markerSeen) { return }", serial)
+        self.assertLess(serial.index("if (-not $script:markerSeen) { return }"),
+                        serial.index("if ($Line -match '^\\[EVENT\\] SENSOR:MAX3010"))
         self.assertIn("$script:mpuSamples -eq 0", serial)
         self.assertIn("$script:opticalSamples -eq 0", serial)
         self.assertIn("exit 6", serial)
