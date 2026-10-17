@@ -180,14 +180,22 @@ void updateButtonState();
 void noteSensorTransportFault(bool optical);
 
 bool probeAddress(uint8_t addr) {
+  uint8_t lastError = 0;
   for (uint8_t attempt = 0; attempt < I2C_TRANSACTION_ATTEMPTS; ++attempt) {
     updateButtonState();
     Wire.beginTransmission(addr);
-    uint8_t error = Wire.endTransmission(true);
+    const uint8_t error = Wire.endTransmission(true);
+    lastError = error;
     updateButtonState();
     if (error == 0) return true;
     delay(1);
   }
+  // A failed address probe previously produced NO useful I2C evidence. Do not
+  // mistake a NACK (2/3) for an ESP32 controller error (4) or timeout (5).
+  // Single GPIO samples are clues, not proof that fast I2C edges are healthy.
+  Serial.printf("[I2C] Probe failed addr=0x%02X error=%u SDA=%d SCL=%d.\n",
+                addr, (unsigned int)lastError,
+                digitalRead(I2C_SDA), digitalRead(I2C_SCL));
   return false;
 }
 
@@ -982,6 +990,13 @@ bool identifyAndConfigureOptical() {
     return false;
   }
 
+  // This confirms that the LED drive SETTINGS were read back correctly.
+  // It cannot measure LED light or prove that the module's LED power rail works.
+  if (opticalChip == OPTICAL_MAX30102) {
+    Serial.println("[OPTICAL_DRIVE] MAX30102 mode=0x03 RED_PA=0x3F IR_PA=0x3F; verified registers, light not measured.");
+  } else {
+    Serial.println("[OPTICAL_DRIVE] MAX30100 mode=0x03 LED_PA=0x55; verified registers, light not measured.");
+  }
   opticalReady = true;
   opticalFaultObserved = false;
   lastOpticalSampleAt = millis();
@@ -1526,6 +1541,7 @@ void setup() {
   Serial.println("[I2C_POLICY] contiguous-fifo-metadata-v19-20261012");
   Serial.println("[CONTACT_POLICY] qualified-contact-v21-20261014");
   Serial.println("[EVIDENCE_POLICY] pulse-and-fall-diags-v22-20261014");
+  Serial.println("[DIAGNOSTIC_POLICY] probe-and-led-evidence-v24-20261017");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);
@@ -1567,6 +1583,11 @@ void setup() {
     Serial.println("[BUS] CONTROLLER_INIT_FAILED; sensor probing suspended, SOS/BLE remain independent.");
   }
 
+  // Flash the *separate GPIO2 board status LED* once at boot. The MAX30102
+  // emitter LEDs are controlled internally by its registers, NOT by GPIO2.
+  // A flash here does not mean either I2C sensor is functional.
+  pulseLed(LED_PULSE_MS);
+  Serial.println("[GPIO_LED] GPIO2 status pulse requested; optical emitters are independent.");
   Serial.println("[READY] BLE + SOS active. Sensor failures are non-fatal.");
   Serial.println("[READY] Quiet mode: idle no-finger vitals are suppressed.");
   Serial.println("[READY] Press GPIO4 button three times within 1.8s for SOS.");
