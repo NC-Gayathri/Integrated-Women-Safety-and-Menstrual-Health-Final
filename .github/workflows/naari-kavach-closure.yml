@@ -9,6 +9,7 @@ on:
       - main
     paths:
       - "esp32-firmware/naari_kavach_dual_sensor_ble_test/**"
+      - "esp32-firmware/max30102_light_probe/**"
       - "services/BleService.ts"
       - "app/(tabs)/safety.tsx"
       - "android/**"
@@ -25,6 +26,7 @@ on:
       - "tsconfig.naari-ci.json"
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
       - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
+      - "documentation/NAARI_KAVACH_V24_SENSOR_LED_RECURRENCE.md"
       - "documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md"
       - "documentation/NAARI_KAVACH_VITALS_ACQUISITION.md"
       - "documentation/NAARI_KAVACH_I2C_RECOVERY.md"
@@ -119,6 +121,7 @@ jobs:
 
           grep -Fq '[CONTACT_POLICY] qualified-contact-v21-20261014' "$F"
           grep -Fq '[EVIDENCE_POLICY] pulse-and-fall-diags-v22-20261014' "$F"
+          grep -Fq '[DIAGNOSTIC_POLICY] probe-and-led-evidence-v24-20261017' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"
@@ -163,6 +166,9 @@ jobs:
 
       - name: Prove v17 failed-controller I2C exclusion and bounded restart escalation
         run: python "formal-verification-and-mathematical-proofs/prove_bus_failclosed.py"
+
+      - name: Prove v24 register-evidence and missing-hardware gate model
+        run: python "formal-verification-and-mathematical-proofs/prove_sensor_light_evidence.py"
 
       - name: Prove complete 24-property GitHub LaTeX dossier and path integrity
         run: python "formal-verification-and-mathematical-proofs/check_proof_documentation.py"
@@ -212,6 +218,15 @@ jobs:
             --fqbn esp32:esp32:esp32doit-devkit-v1 \
             --output-dir build/naari-kavach \
             esp32-firmware/naari_kavach_dual_sensor_ble_test
+
+      - name: Compile isolated MAX30102 emitter and low-speed I2C diagnostic
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32doit-devkit-v1 \
+            --output-dir build/naari-kavach-light-probe \
+            esp32-firmware/max30102_light_probe
 
       - name: Record firmware source and checksums
         shell: bash
