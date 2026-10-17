@@ -1,5 +1,28 @@
 # ESP32 firmware
 
+## October 17, 2026: recurrent unlit sensor / I2C-not-ready diagnostics (v24)
+
+The **official BLE + SOS firmware** remains
+[`naari_kavach_dual_sensor_ble_test.ino`](naari_kavach_dual_sensor_ble_test/naari_kavach_dual_sensor_ble_test.ino).
+After flashing the current `master`, demand the additional boot marker
+`[DIAGNOSTIC_POLICY] probe-and-led-evidence-v24-20261017`.
+Its GPIO2 status LED briefly pulses at boot independently of either sensor;
+it **does not** enable the MAX30102 red/IR emitters.
+
+The firmware now shows real failed probe address/error codes (such as
+`[I2C] Probe failed addr=0x57 error=2 ...`) and reports
+`[OPTICAL_DRIVE]` **only after MAX configuration register readback**.
+Register proof does not prove light physically shines or that a BPM is valid.
+
+For the new power-off isolation sequence, independent 10-kHz MAX30102 red/IR
+emitter test, expected messages, hardware safety, and limitations, see
+[**v24 sensor/LED recurrence guide**](../documentation/NAARI_KAVACH_V24_SENSOR_LED_RECURRENCE.md).
+The isolated sketch is
+[`max30102_light_probe.ino`](max30102_light_probe/max30102_light_probe.ino).
+**It is NOT BLE/SOS firmware**. Reflash the official firmware immediately
+after completing the isolated optical test.
+
+
 ## Current NAARI KAVACH dual-sensor BLE firmware — 9 October 2026
 
 For the current BLE/SOS + motion + optical integration, flash:

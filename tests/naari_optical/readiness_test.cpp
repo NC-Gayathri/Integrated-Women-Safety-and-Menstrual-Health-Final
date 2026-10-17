@@ -27,7 +27,48 @@ int main(int argc, char** argv) {
   const bool max100 = name.find("100") != std::string::npos;
   Wire.reset(max100 ? 0x11 : 0x15);
   try {
-    if (name == "mpu_wake_error4_isolated" || name == "mpu_config_error4_isolated") {
+    if (name == "probe_absent_diagnostics_sos") {
+      // Both sensor probes fail. The firmware must expose the actual address and
+      // error code without inventing READY, light, heart rate, or fall evidence.
+      Wire.absent = true;
+      Wire.failureMs = 0;
+      testClock = 2000;
+      const auto startedAt = millis();
+      buttonEdges = {{startedAt + 100, LOW}, {startedAt + 250, HIGH},
+                     {startedAt + 400, LOW}, {startedAt + 550, HIGH},
+                     {startedAt + 700, LOW}, {startedAt + 850, HIGH}};
+      while (millis() - startedAt < 1500) loop();
+      require(Serial.output.find("Probe failed addr=0x68 error=2") != std::string::npos &&
+              Serial.output.find("Probe failed addr=0x69 error=2") != std::string::npos &&
+              Serial.output.find("Probe failed addr=0x57 error=2") != std::string::npos,
+              "unavailable sensor addresses need bounded, actionable NACK evidence");
+      require(Serial.output.find("[EVENT] SOS\n") != std::string::npos,
+              "SOS must remain functional when both sensor addresses fail");
+      require(!opticalReady && !mpuReady && !heartRateValid && !spo2Valid &&
+              Serial.output.find("[OPTICAL_DRIVE]") == std::string::npos,
+              "absent modules must not emit verified LED-drive or vital evidence");
+    } else if (name == "optical_drive_verified_100" || name == "optical_drive_verified_102") {
+      require(identifyAndConfigureOptical(), "healthy optical identity/configuration must pass");
+      require(Serial.output.find(max100 ?
+                 "[OPTICAL_DRIVE] MAX30100 mode=0x03 LED_PA=0x55" :
+                 "[OPTICAL_DRIVE] MAX30102 mode=0x03 RED_PA=0x3F IR_PA=0x3F")
+                 != std::string::npos,
+              "only a read-back verified optical configuration can report its LED registers");
+    } else if (name == "gpio2_boot_pulse_independent") {
+      Wire.absent = true;
+      setup();
+      require(Serial.output.find("[GPIO_LED] GPIO2 status pulse requested") != std::string::npos &&
+              Serial.output.find("[DIAGNOSTIC_POLICY] probe-and-led-evidence-v24-20261017")
+                  != std::string::npos,
+              "real firmware setup must document the new standalone GPIO2 LED test");
+      require(!pinWrites.empty() && pinWrites.back().first == PIN_LED &&
+              pinWrites.back().second == HIGH && !opticalReady,
+              "GPIO2 test pulse must work without an optical device");
+      delay(LED_PULSE_MS);
+      updateLed();
+      require(pinWrites.back().first == PIN_LED && pinWrites.back().second == LOW,
+              "GPIO2 boot pulse must end, not latch the LED on");
+    } else if (name == "mpu_wake_error4_isolated" || name == "mpu_config_error4_isolated") {
       require(identifyAndConfigureOptical(), "optical sensor must start healthy");
       Wire.enableMpu(0x70);
       Wire.failWriteReg = name == "mpu_wake_error4_isolated" ? 0x6B : 0x1C;

@@ -11,6 +11,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = [
+    'probe_absent_diagnostics_sos', 'optical_drive_verified_100',
+    'optical_drive_verified_102', 'gpio2_boot_pulse_independent',
     'mpu_wake_error4_isolated', 'mpu_config_error4_isolated',
     'ready_100', 'ready_102', 'deferred_read_failure', 'transient_write',
     'absent', 'unreadable_identity', 'unknown', 'reset_timeout_100',
