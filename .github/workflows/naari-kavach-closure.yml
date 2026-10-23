@@ -245,6 +245,21 @@ jobs:
             --output-dir build/naari-v25-triage \
             esp32-firmware/naari_sensor_triage
 
+      - name: Record exact-source V25 diagnostic checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GITHUB_SHA" > build/naari-v25-triage/SOURCE_COMMIT.txt
+          printf '%s\n' 'DIAGNOSTIC ONLY: temporarily disables BLE/SOS; reflash production firmware' > build/naari-v25-triage/DO_NOT_WEAR.txt
+          (cd build/naari-v25-triage && sha256sum *.bin > SHA256SUMS)
+
+      - name: Preserve independent diagnostic firmware binary (NOT FOR WEAR)
+        uses: actions/upload-artifact@v4
+        with:
+          name: naari-v25-triage-not-for-wear
+          path: build/naari-v25-triage/*
+          if-no-files-found: error
+
       - name: Record firmware source and checksums
         shell: bash
         run: |
