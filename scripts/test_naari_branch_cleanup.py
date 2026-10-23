@@ -106,6 +106,25 @@ with tempfile.TemporaryDirectory(prefix='naari-cleanup-') as temp:
     attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
     assert attempt.returncode == 0, attempt.stderr
 
+    # New V25 diagnostic repair is allowlisted by exact name, never by prefix.
+    v25 = 'fix/naari-v25-evidence-based-physical-triage'
+    v25_ref = f'refs/heads/{v25}'
+    git(work, 'push', 'origin', f'HEAD:{v25_ref}')
+    env['REPAIR_BRANCH'] = v25
+    env['REPAIR_HEAD'] = verified  # Simulates a branch changed since verification.
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode != 0, 'v25 stale SHA must not delete a branch'
+    assert git(remote, 'rev-parse', v25_ref) == newer, 'v25 should survive stale lease'
+    env['REPAIR_HEAD'] = newer
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode == 0, attempt.stderr
+    assert not git(remote, 'for-each-ref', '--format=%(refname)', v25_ref)
+    print('PASS exact v25 cleanup with expected-head lease')
+    env['REPAIR_BRANCH'] = v25 + '-extra'
+    attempt = subprocess.run(['bash', str(SCRIPT)], cwd=work, env=env, capture_output=True, text=True)
+    assert attempt.returncode != 0, 'lookalike v25 branch must not be allowed'
+    print('PASS v25 lookalike branch deletion rejected')
+
     # The GitHub Actions verification must pin the merge, branch, PR, and master.
     workflow = (ROOT / '.github/workflows/naari-kavach-closure.yml').read_text()
     for required in (
