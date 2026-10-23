@@ -1,5 +1,25 @@
 # ESP32 firmware
 
+## V25 — 23 October 2026: urgent 30-second physical fault triage
+
+Gayathri's project submission is due on **3 November 2026**. Prior
+software verification has NOT established working hardware. See the
+[V25 hardware triage procedure](../documentation/NAARI_KAVACH_V25_HARDWARE_TRIAGE.md)
+before modifying more firmware or making a device-health claim.
+
+The independent [V25 temporary Arduino diagnostic](naari_sensor_triage/naari_sensor_triage.ino)
+reads actual MPU samples and MAX30102 FIFO frames at 10 kHz. It explicitly
+records absent NACKs, failed sensor register stages, and any unverified
+optical shutdown. It has **NO BLE / SOS / fall notification** and must not be
+left flashed on a wearable: reflash the official dual-sensor application
+below immediately after collecting the 30-second serial report.
+
+A MAX30102 red LED may be faint and its infrared LED is invisible to the
+naked eye. Neither software readbacks nor an unlit visual appearance proves
+which electrical component failed. Correct module-specific voltages and
+stable I2C power/pull-ups require actual physical measurement.
+
+
 ## October 17, 2026: recurrent unlit sensor / I2C-not-ready diagnostics (v24)
 
 The **official BLE + SOS firmware** remains
