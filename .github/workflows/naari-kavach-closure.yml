@@ -358,7 +358,8 @@ jobs:
                pr.head.ref === 'fix/naari-formal-assurance-v12' ||
                pr.head.ref === 'fix/naari-github-math-render-v15' ||
                pr.head.ref === 'fix/naari-recurrent-i2c-failclosed-v17' ||
-               pr.head.ref === 'fix/naari-optical-poll-and-vitals-events-v18')
+               pr.head.ref === 'fix/naari-optical-poll-and-vitals-events-v18' ||
+               pr.head.ref === 'fix/naari-v25-evidence-based-physical-triage')
             );
 
             if (candidates.length === 0) {
