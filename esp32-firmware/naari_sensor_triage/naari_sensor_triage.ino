@@ -27,6 +27,7 @@ constexpr uint16_t I2C_TIMEOUT_MS = 80;
 
 bool busReady = false;
 bool opticalReady = false;
+bool opticalConfigured = false; // True until shutdown even after a FIFO transport failure.
 bool mpuReady = false;
 bool testFinished = false;
 uint8_t mpuAddr = 0;
@@ -166,6 +167,7 @@ bool initOptical() {
     Serial.println("[TRIAGE_OPTICAL] CONFIG_FAIL; LED drive NOT established.");
     return false;
   }
+  opticalConfigured = true;
   Serial.println("[TRIAGE_OPTICAL] DRIVE_REGISTERS_VERIFIED; not proof of physical light.");
   return true;
 }
@@ -230,9 +232,10 @@ void finishTest() {
   // Fail safe: request optical shutdown whenever an optical device was
   // configured. A failed command is NOT reported as successful shutdown.
   bool stopVerified = false;
-  if (opticalSamples > 0 || opticalReady) {
+  if (opticalConfigured) {
     stopVerified = write8(OPT_ADDR, 0x09, 0x80) &&
                    matches(OPT_ADDR, 0x09, 0x80, 0xC7);
+    if (stopVerified) opticalConfigured = false;
   }
   Serial.printf("[TRIAGE_SUMMARY] optical_samples=%lu nonzero=%lu range_red=%lu..%lu range_ir=%lu..%lu mpu_samples=%lu opt_errors=%lu mpu_errors=%lu opt_acks=%lu mpu_acks=%lu\n",
     (unsigned long)opticalSamples, (unsigned long)opticalNonzero,
