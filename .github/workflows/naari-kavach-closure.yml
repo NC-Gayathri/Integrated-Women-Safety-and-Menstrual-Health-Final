@@ -240,7 +240,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          arduino-cli compile             --fqbn esp32:esp32:esp32doit-devkit-v1             --output-dir build/naari-v25-triage             esp32-firmware/naari_sensor_triage
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32doit-devkit-v1 \
+            --output-dir build/naari-v25-triage \
+            esp32-firmware/naari_sensor_triage
 
       - name: Record firmware source and checksums
         shell: bash
