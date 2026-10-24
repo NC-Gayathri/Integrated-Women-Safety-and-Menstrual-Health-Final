@@ -12,6 +12,7 @@ struct WireFake {
   bool nonStop = false, absent = false, failReads = false;
   bool failRepeatedStart = false, stuckReset = false, shutdown = false;
   bool configured = false, shortFifo = false, shortMetadata = false, fifoErrorAfterConsumption = false;
+  bool simulateFreshOpticalFifo = false; // Opt-in deterministic FIFO frames for standalone triage tests.
   bool mpuPresent = false;
   int failWriteReg = -1, mismatchReg = -1, failReadReg = -1;
   uint8_t writeFailureCode = 2;
@@ -130,6 +131,16 @@ struct WireFake {
     }
 
     if (fifo) ++fifoRequests;
+    // Inject real-looking but explicitly FAKE frames only for a dedicated
+    // host regression. Never enable this simulator in production ESP32 code.
+    // An unread word remains pending while a new one arrives each poll.
+    if (fifo && simulateFreshOpticalFifo && length == 6) {
+      const uint8_t frame[6] = {0x00, 0x27, 0x10, 0x00, 0x4E, 0x20};
+      for (uint8_t value : frame) rx.push_back(value);
+      regs[0x06] = (regs[0x06] + 1) & 0x1F;
+      regs[0x04] = (regs[0x04] + 1) & 0x1F;
+      return 6;
+    }
     if (fifo && fifoErrorAfterConsumption && fifoRequests == 1) {
       // ESP32 reports zero on any I2C error, even after hardware consumed bytes.
       const auto readPointer = modeRegister == 0x06 ? 0x04 : 0x06;

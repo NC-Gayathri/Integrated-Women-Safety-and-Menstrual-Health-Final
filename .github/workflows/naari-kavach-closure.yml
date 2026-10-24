@@ -10,6 +10,7 @@ on:
     paths:
       - "esp32-firmware/naari_kavach_dual_sensor_ble_test/**"
       - "esp32-firmware/max30102_light_probe/**"
+      - "esp32-firmware/naari_sensor_triage/**"
       - "services/BleService.ts"
       - "app/(tabs)/safety.tsx"
       - "android/**"
@@ -27,6 +28,7 @@ on:
       - "documentation/NAARI_KAVACH_DUAL_SENSOR_BLE_TEST_PLAN.md"
       - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
       - "documentation/NAARI_KAVACH_V24_SENSOR_LED_RECURRENCE.md"
+      - "documentation/NAARI_KAVACH_V25_HARDWARE_TRIAGE.md"
       - "documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md"
       - "documentation/NAARI_KAVACH_VITALS_ACQUISITION.md"
       - "documentation/NAARI_KAVACH_I2C_RECOVERY.md"
@@ -55,6 +57,9 @@ jobs:
 
       - name: Execute optical fault and SOS regressions
         run: python3 scripts/test_naari_optical_behavior.py
+
+      - name: Execute 30-second sensor triage real-source regressions
+        run: python3 scripts/test_naari_sensor_triage.py
 
       - name: Execute sampled-signal and stale-reading regressions
         run: python3 scripts/test_naari_vitals_behavior.py
@@ -170,6 +175,9 @@ jobs:
       - name: Prove v24 register-evidence and missing-hardware gate model
         run: python "formal-verification-and-mathematical-proofs/prove_sensor_light_evidence.py"
 
+      - name: Prove v25 source-linked diagnostic evidence gate obligations
+        run: python "formal-verification-and-mathematical-proofs/prove_sensor_triage.py"
+
       - name: Prove complete 24-property GitHub LaTeX dossier and path integrity
         run: python "formal-verification-and-mathematical-proofs/check_proof_documentation.py"
 
@@ -227,6 +235,30 @@ jobs:
             --fqbn esp32:esp32:esp32doit-devkit-v1 \
             --output-dir build/naari-kavach-light-probe \
             esp32-firmware/max30102_light_probe
+
+      - name: Compile dedicated MPU and MAX30102 optical FIFO triage
+        shell: bash
+        run: |
+          set -euo pipefail
+          arduino-cli compile \
+            --fqbn esp32:esp32:esp32doit-devkit-v1 \
+            --output-dir build/naari-v25-triage \
+            esp32-firmware/naari_sensor_triage
+
+      - name: Record exact-source V25 diagnostic checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GITHUB_SHA" > build/naari-v25-triage/SOURCE_COMMIT.txt
+          printf '%s\n' 'DIAGNOSTIC ONLY: temporarily disables BLE/SOS; reflash production firmware' > build/naari-v25-triage/DO_NOT_WEAR.txt
+          (cd build/naari-v25-triage && sha256sum *.bin > SHA256SUMS)
+
+      - name: Preserve independent diagnostic firmware binary (NOT FOR WEAR)
+        uses: actions/upload-artifact@v4
+        with:
+          name: naari-v25-triage-not-for-wear
+          path: build/naari-v25-triage/*
+          if-no-files-found: error
 
       - name: Record firmware source and checksums
         shell: bash
@@ -341,7 +373,8 @@ jobs:
                pr.head.ref === 'fix/naari-formal-assurance-v12' ||
                pr.head.ref === 'fix/naari-github-math-render-v15' ||
                pr.head.ref === 'fix/naari-recurrent-i2c-failclosed-v17' ||
-               pr.head.ref === 'fix/naari-optical-poll-and-vitals-events-v18')
+               pr.head.ref === 'fix/naari-optical-poll-and-vitals-events-v18' ||
+               pr.head.ref === 'fix/naari-v25-evidence-based-physical-triage')
             );
 
             if (candidates.length === 0) {
