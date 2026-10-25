@@ -311,6 +311,9 @@ jobs:
       - name: Execute global ESP32-to-app SOS and contacts regression
         run: node scripts/test_naari_global_sos.cjs
 
+      - name: Exercise real global emergency contact chooser and user-click dialer
+        run: node scripts/test_naari_sos_modal.cjs
+
   android-native:
     name: Android native BLE build
     runs-on: ubuntu-latest
