@@ -22,7 +22,7 @@ export function IoTEmergencyModal({ emergency, onDismiss }: IoTEmergencyModalPro
     setContacts([]);
     setContactsLoaded(false);
     setOpeningNumber(null);
-    if (emergency) {
+    if (emergency?.id !== undefined) {
       // Cache is populated by the safety tab; does NOT require internet when
       // the ESP32 sends its BLE "SOS" packet.
       void AsyncStorage.getItem('emergencyContacts')
