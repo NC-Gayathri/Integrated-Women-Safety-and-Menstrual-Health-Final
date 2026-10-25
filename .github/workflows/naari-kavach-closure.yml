@@ -65,9 +65,6 @@ jobs:
       - name: Execute 30-second sensor triage real-source regressions
         run: python3 scripts/test_naari_sensor_triage.py
 
-      - name: Exercise app-wide physical BLE SOS and offline contact policies
-        run: node scripts/test_naari_global_sos.cjs
-
       - name: Execute sampled-signal and stale-reading regressions
         run: python3 scripts/test_naari_vitals_behavior.py
 
@@ -302,13 +299,16 @@ jobs:
         run: npm ci
 
       - name: Lint changed app integration
-        run: npx eslint "services/BleService.ts" "app/(tabs)/safety.tsx"
+        run: npx eslint "services/BleService.ts" "app/(tabs)/safety.tsx" "hooks/useIoTEmergencyListener.ts" "components/IoTEmergencyModal.tsx" "services/EmergencyContacts.ts"
 
       - name: TypeScript check
         run: npx tsc --noEmit -p tsconfig.naari-ci.json
 
       - name: Verify BLE vitals invalidation and SOS behavior
         run: node scripts/test_naari_ble_vitals.cjs
+
+      - name: Execute global ESP32-to-app SOS and contacts regression
+        run: node scripts/test_naari_global_sos.cjs
 
   android-native:
     name: Android native BLE build
