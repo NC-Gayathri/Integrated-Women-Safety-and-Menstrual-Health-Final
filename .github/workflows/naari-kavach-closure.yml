@@ -13,6 +13,10 @@ on:
       - "esp32-firmware/naari_sensor_triage/**"
       - "services/BleService.ts"
       - "app/(tabs)/safety.tsx"
+      - "app/(tabs)/_layout.tsx"
+      - "hooks/useIoTEmergencyListener.ts"
+      - "components/IoTEmergencyModal.tsx"
+      - "services/EmergencyContacts.ts"
       - "android/**"
       - "ble-bridge/*.ps1"
       - "scripts/test_naari_*.py"
@@ -60,6 +64,9 @@ jobs:
 
       - name: Execute 30-second sensor triage real-source regressions
         run: python3 scripts/test_naari_sensor_triage.py
+
+      - name: Exercise app-wide physical BLE SOS and offline contact policies
+        run: node scripts/test_naari_global_sos.cjs
 
       - name: Execute sampled-signal and stale-reading regressions
         run: python3 scripts/test_naari_vitals_behavior.py
@@ -177,6 +184,9 @@ jobs:
 
       - name: Prove v25 source-linked diagnostic evidence gate obligations
         run: python "formal-verification-and-mathematical-proofs/prove_sensor_triage.py"
+
+      - name: Prove v26 SOS-to-foreground-app alert policy
+        run: python "formal-verification-and-mathematical-proofs/prove_global_sos.py"
 
       - name: Prove complete 24-property GitHub LaTeX dossier and path integrity
         run: python "formal-verification-and-mathematical-proofs/check_proof_documentation.py"
