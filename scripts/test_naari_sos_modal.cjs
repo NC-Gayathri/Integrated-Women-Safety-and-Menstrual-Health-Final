@@ -45,9 +45,9 @@ const react = {
   },
 };
 const jsx = (type, props) => ({ type, props: props || {} });
-const exports = {};
+const modalExports = {};
 const context = {
-  exports,
+  exports: modalExports,
   console: { warn() {} },
   require(name) {
     if (name === 'react') return react;
