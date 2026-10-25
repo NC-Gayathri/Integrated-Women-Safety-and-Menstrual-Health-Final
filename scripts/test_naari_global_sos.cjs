@@ -91,9 +91,9 @@ const appState = {
 };
 let intervalCount = 0;
 let vibCount = 0;
-const module = { exports: {} };
+const hookModule = { exports: {} };
 const ctx = {
-  module, exports: module.exports, console: logging, Date, Promise,
+  module: hookModule, exports: hookModule.exports, console: logging, Date, Promise,
   setInterval(fn, ms) { assert.equal(ms, 5000); intervalCount++; return intervalCount; },
   clearInterval(){},
   require(name) {
@@ -113,7 +113,7 @@ const ctx = {
 };
 vm.runInNewContext(js(read('hooks/useIoTEmergencyListener.ts'),
   'useIoTEmergencyListener.ts'), ctx);
-const render = () => { index = 0; effects = []; return module.exports.useIoTEmergencyListener(); };
+const render = () => { index = 0; effects = []; return hookModule.exports.useIoTEmergencyListener(); };
 const flushEffects = () => { for (const effect of effects) cleanups.push(effect()); };
 
 async function test() {
