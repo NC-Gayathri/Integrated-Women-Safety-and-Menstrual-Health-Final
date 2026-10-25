@@ -68,7 +68,7 @@ checks = [
     ("local alert independent of server", (local_alert, Not(backend_up), Not(contact_chooser))),
     ("display of contacts does not open dialer", (dialer_open, Not(clicked_contact))),
     ("invalid/missing contacts do not open dialer", (dialer_open, Not(contact_exists))),
-    ("no actual call is asserted from dialer opening", (dialer_open, Not(call_placed), call_placed)),
+    ("dialer opening requires an actual emergency UI", (dialer_open, Not(local_alert))),
 ]
 for label, terms in checks: check_unsat(label, *terms)
 
