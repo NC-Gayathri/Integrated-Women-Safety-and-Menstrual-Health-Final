@@ -1,19 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Modal,
-  TouchableOpacity,
-  Platform,
-  Alert,
-} from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import React, { useEffect, useState } from 'react';
+import { Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Haptics from 'expo-haptics';
+import { router } from 'expo-router';
 import { IoTEmergencyEvent } from '../services/IoTService';
+import { DialContact, normalizeEmergencyContacts, safeDialNumber } from '../services/EmergencyContacts';
 
 interface IoTEmergencyModalProps {
   emergency: IoTEmergencyEvent | null;
@@ -21,165 +13,124 @@ interface IoTEmergencyModalProps {
 }
 
 export function IoTEmergencyModal({ emergency, onDismiss }: IoTEmergencyModalProps) {
-  const [countdown, setCountdown] = useState(10);
-  const [isCalling, setIsCalling] = useState(false);
-  const countdownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [contacts, setContacts] = useState<DialContact[]>([]);
+  const [contactsLoaded, setContactsLoaded] = useState(false);
+  const [openingNumber, setOpeningNumber] = useState<string | null>(null);
 
-  const isButtonSOS = emergency?.event_type === 'BUTTON_SOS';
-  const isFall = emergency?.event_type === 'FALL_DETECTED';
-  const isHeartRate = emergency?.event_type === 'HEART_RATE_EMERGENCY';
-
-  // Handle countdown for BUTTON_SOS
   useEffect(() => {
-    if (!emergency) {
-      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
-      setCountdown(10);
-      setIsCalling(false);
-      return;
+    let current = true;
+    setContacts([]);
+    setContactsLoaded(false);
+    setOpeningNumber(null);
+    if (emergency?.id !== undefined) {
+      // Cache is populated by the safety tab; does NOT require internet when
+      // the ESP32 sends its BLE "SOS" packet.
+      void AsyncStorage.getItem('emergencyContacts')
+        .then(raw => {
+          if (!current) return;
+          let stored: unknown = [];
+          try { stored = raw ? JSON.parse(raw) : []; } catch { stored = []; }
+          setContacts(normalizeEmergencyContacts(stored));
+        })
+        .catch(() => { if (current) setContacts([]); })
+        .finally(() => { if (current) setContactsLoaded(true); });
     }
+    return () => { current = false; };
+  }, [emergency?.event_id, emergency?.id]);
 
-    if (isButtonSOS) {
-      setCountdown(10);
-      countdownTimerRef.current = setInterval(() => {
-        setCountdown((prev) => {
-          if (prev <= 1) {
-            if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
-            handleCallContacts();
-            return 0;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-    } else {
-      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
-    }
-
-    return () => {
-      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
-    };
-  }, [emergency?.id, emergency?.event_type]);
-
-  const handleCallContacts = async () => {
-    if (isCalling) return;
-    setIsCalling(true);
-
+  const openDialer = async (contact: DialContact) => {
+    const number = safeDialNumber(contact.phone);
+    if (!number || openingNumber) return;
+    setOpeningNumber(number);
     try {
-      const savedContacts = await AsyncStorage.getItem('emergencyContacts');
-      const contacts: string[] = savedContacts ? JSON.parse(savedContacts) : [];
-
-      if (contacts.length > 0) {
-        const primaryPhone = contacts[0].replace(/\s+/g, '');
-        Linking.openURL(`tel:${primaryPhone}`);
-      } else {
-        // Fallback emergency number
-        Linking.openURL('tel:112');
-      }
-    } catch (e) {
-      console.warn('Error opening dialer:', e);
-      Linking.openURL('tel:112');
+      // This opens Android's dialer. The user decides whether to actually call.
+      await Linking.openURL('tel:' + number);
+    } catch {
+      Alert.alert('Could not open phone dialer',
+        'Please open your phone app and call your trusted contact directly.');
+    } finally {
+      setOpeningNumber(null);
     }
   };
 
-  const handleDismiss = () => {
-    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+  const openManageContacts = () => {
     onDismiss();
+    router.push('/(tabs)/safety');
   };
 
   if (!emergency) return null;
+  const sos = emergency.event_type === 'BUTTON_SOS';
+  const fall = emergency.event_type === 'FALL_DETECTED';
+  const source = emergency.id < 0 ? 'Direct ESP32 Bluetooth' : 'Registered IoT event';
 
   return (
-    <Modal
-      visible={!!emergency}
-      transparent
-      animationType="fade"
-      statusBarTranslucent
-    >
-      <View style={styles.overlay}>
-        <View style={styles.card}>
-          {/* Header Badge */}
-          <LinearGradient
-            colors={isButtonSOS ? ['#d50000', '#b71c1c'] : isFall ? ['#e65100', '#bf360c'] : ['#880e4f', '#4a148c']}
-            style={styles.iconCircle}
-          >
-            {isButtonSOS && <Ionicons name="alert-circle" size={48} color="#fff" />}
-            {isFall && <Ionicons name="body" size={48} color="#fff" />}
-            {isHeartRate && <MaterialCommunityIcons name="heart-pulse" size={48} color="#fff" />}
-          </LinearGradient>
-
-          {/* Title and Description */}
+    <Modal visible transparent animationType="fade" statusBarTranslucent
+      onRequestClose={onDismiss}>
+      <View style={styles.backdrop}>
+        <View style={styles.sheet}>
+          <Ionicons name={sos ? 'alert-circle' : fall ? 'warning' : 'heart'}
+            size={46} color="#c62828" accessibilityLabel="Emergency alert" />
           <Text style={styles.title}>
-            {isButtonSOS
-              ? '🚨 Hardware SOS Triggered!'
-              : isFall
-              ? '⚠ Fall Detected!'
-              : '💓 Abnormal Heart Rate Alert!'}
+            {sos ? '🚨 Hardware SOS received' :
+             fall ? '⚠ Fall alert received' : '⚠ Wearable emergency alert'}
           </Text>
-
           <Text style={styles.description}>
-            {isButtonSOS
-              ? 'Emergency push button was pressed 3 times on your IoT wearable device.'
-              : isFall
-              ? 'A sudden impact or fall was detected by your wearable device sensors.'
-              : `Your wearable detected an abnormal pulse rate of ${emergency.heart_rate || 'N/A'} BPM.`}
+            {sos
+              ? 'Your ESP32 SOS button sent an alert to the app.'
+              : fall
+                ? 'Your wearable reported a fall. Check your situation and contact help if needed.'
+                : 'An emergency event was reported by your wearable.'}
+          </Text>
+          <Text style={styles.source}>Source: {source}</Text>
+          <Text style={styles.section}>Your emergency contacts</Text>
+          <Text style={styles.hint}>
+            Choose a contact below to open the phone dialer. Calls and messages
+            are not sent automatically.
           </Text>
 
-          {/* Telemetry Details */}
-          <View style={styles.detailsBox}>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Device ID:</Text>
-              <Text style={styles.detailValue}>{emergency.device_id}</Text>
-            </View>
-            {emergency.heart_rate ? (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Heart Rate:</Text>
-                <Text style={[styles.detailValue, { color: '#e91e63', fontWeight: '800' }]}>
-                  {emergency.heart_rate} BPM
-                </Text>
-              </View>
-            ) : null}
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Event Time:</Text>
-              <Text style={styles.detailValue}>
-                {emergency.created_at ? new Date(emergency.created_at).toLocaleTimeString() : 'Just now'}
-              </Text>
-            </View>
-          </View>
-
-          {/* Button SOS Countdown Indicator */}
-          {isButtonSOS && countdown > 0 && (
-            <View style={styles.countdownContainer}>
-              <Text style={styles.countdownText}>
-                Calling Emergency Contact in <Text style={styles.countdownNumber}>{countdown}</Text>s
-              </Text>
-            </View>
+          {!contactsLoaded ? (
+            <Text style={styles.notice}>Loading locally saved contacts…</Text>
+          ) : contacts.length === 0 ? (
+            <Text style={styles.notice}>
+              No valid saved contacts found on this phone. Add a trusted
+              contact in the Safety tab. No emergency number will be dialled
+              without your action.
+            </Text>
+          ) : (
+            <ScrollView style={styles.contacts} nestedScrollEnabled
+              contentContainerStyle={styles.contactsContent}>
+              {contacts.map(contact => (
+                <TouchableOpacity
+                  key={contact.phone}
+                  accessibilityRole="button"
+                  accessibilityLabel={'Open dialer for ' + contact.name}
+                  style={styles.contactButton}
+                  disabled={openingNumber !== null}
+                  onPress={() => void openDialer(contact)}>
+                  <View style={styles.contactText}>
+                    <Text style={styles.contactName}>
+                      {contact.name}{contact.isPrimary ? ' · Primary' : ''}
+                    </Text>
+                    <Text style={styles.phone}>{contact.phone}</Text>
+                  </View>
+                  <Ionicons name="call-outline" size={23} color="#b71c1c" />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
           )}
 
-          {/* Actions */}
-          <View style={styles.actionColumn}>
-            <TouchableOpacity
-              style={styles.callButton}
-              activeOpacity={0.85}
-              onPress={handleCallContacts}
-            >
-              <LinearGradient
-                colors={['#d50000', '#b71c1c']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.callButtonGradient}
-              >
-                <Ionicons name="call" size={22} color="#fff" style={{ marginRight: 8 }} />
-                <Text style={styles.callButtonText}>Call Emergency Contact</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.dismissButton}
-              activeOpacity={0.7}
-              onPress={handleDismiss}
-            >
-              <Text style={styles.dismissButtonText}>I Am Safe (Dismiss Alert)</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity style={styles.manageButton} onPress={openManageContacts}
+            accessibilityRole="button">
+            <Text style={styles.manageText}>Manage emergency contacts</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.dismissButton} onPress={onDismiss}
+            accessibilityRole="button">
+            <Text style={styles.dismissText}>Dismiss alert / I am safe</Text>
+          </TouchableOpacity>
+          <Text style={styles.disclaimer}>
+            Foreground BLE connection required for direct alerts. This is not
+            a substitute for emergency services or a guaranteed background notification.
+          </Text>
         </View>
       </View>
     </Modal>
@@ -187,130 +138,26 @@ export function IoTEmergencyModal({ emergency, onDismiss }: IoTEmergencyModalPro
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 3, 29, 0.85)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-    zIndex: 9999,
-  },
-  card: {
-    width: '100%',
-    maxWidth: 380,
-    backgroundColor: '#ffffff',
-    borderRadius: 28,
-    paddingHorizontal: 22,
-    paddingVertical: 28,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
-    elevation: 24,
-  },
-  iconCircle: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 16,
-    shadowColor: '#d50000',
-    shadowOpacity: 0.5,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 10,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: '#1c0d2b',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  description: {
-    fontSize: 14,
-    color: '#554168',
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 18,
-  },
-  detailsBox: {
-    width: '100%',
-    backgroundColor: '#f8f2fc',
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(142, 36, 170, 0.15)',
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 4,
-  },
-  detailLabel: {
-    fontSize: 13,
-    color: '#7a6590',
-    fontWeight: '600',
-  },
-  detailValue: {
-    fontSize: 13,
-    color: '#2a0845',
-    fontWeight: '700',
-  },
-  countdownContainer: {
-    backgroundColor: '#ffebee',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#ffcdd2',
-  },
-  countdownText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#c62828',
-  },
-  countdownNumber: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#b71c1c',
-  },
-  actionColumn: {
-    width: '100%',
-  },
-  callButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 10,
-    shadowColor: '#d50000',
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 6,
-  },
-  callButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-  },
-  callButtonText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
-  dismissButton: {
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  dismissButtonText: {
-    color: '#7a6590',
-    fontSize: 14,
-    fontWeight: '700',
-  },
+  backdrop: { flex: 1, backgroundColor: 'rgba(24,8,38,0.78)', justifyContent: 'center', padding: 18 },
+  sheet: { borderRadius: 24, backgroundColor: '#fff', padding: 22, alignItems: 'center', maxHeight: '90%', elevation: 14 },
+  title: { fontSize: 21, fontWeight: '900', color: '#6a0030', textAlign: 'center', marginTop: 7 },
+  description: { fontSize: 14, color: '#4e355d', textAlign: 'center', marginTop: 9, lineHeight: 21 },
+  source: { fontSize: 12, color: '#69547a', marginTop: 9 },
+  section: { alignSelf: 'stretch', marginTop: 19, fontSize: 17, fontWeight: '800', color: '#26112e' },
+  hint: { fontSize: 12, color: '#69547a', alignSelf: 'stretch', marginTop: 5, lineHeight: 18 },
+  notice: { color: '#6f507f', fontSize: 14, marginTop: 14, marginBottom: 14, textAlign: 'center' },
+  contacts: { alignSelf: 'stretch', marginTop: 10, maxHeight: 220 },
+  contactsContent: { paddingBottom: 5 },
+  contactButton: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#efdae8',
+    borderRadius: 14, padding: 12, marginBottom: 8, backgroundColor: '#fff8fc' },
+  contactText: { flex: 1 },
+  contactName: { fontSize: 15, fontWeight: '700', color: '#371546' },
+  phone: { fontSize: 13, color: '#70547b', marginTop: 3 },
+  manageButton: { marginTop: 12, paddingVertical: 12, alignSelf: 'stretch', alignItems: 'center',
+    borderWidth: 1, borderColor: '#af81b0', borderRadius: 13 },
+  manageText: { color: '#6d3573', fontWeight: '700', fontSize: 14 },
+  dismissButton: { marginTop: 10, backgroundColor: '#773180', paddingVertical: 13,
+    alignSelf: 'stretch', alignItems: 'center', borderRadius: 14 },
+  dismissText: { color: '#fff', fontSize: 15, fontWeight: '800' },
+  disclaimer: { fontSize: 10, textAlign: 'center', color: '#756782', marginTop: 11, lineHeight: 15 },
 });

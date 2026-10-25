@@ -13,6 +13,10 @@ on:
       - "esp32-firmware/naari_sensor_triage/**"
       - "services/BleService.ts"
       - "app/(tabs)/safety.tsx"
+      - "app/(tabs)/_layout.tsx"
+      - "hooks/useIoTEmergencyListener.ts"
+      - "components/IoTEmergencyModal.tsx"
+      - "services/EmergencyContacts.ts"
       - "android/**"
       - "ble-bridge/*.ps1"
       - "scripts/test_naari_*.py"
@@ -29,6 +33,7 @@ on:
       - "documentation/NAARI_KAVACH_OPTICAL_READY_REPAIR.md"
       - "documentation/NAARI_KAVACH_V24_SENSOR_LED_RECURRENCE.md"
       - "documentation/NAARI_KAVACH_V25_HARDWARE_TRIAGE.md"
+      - "documentation/NAARI_KAVACH_V26_GLOBAL_SOS_CONTACTS.md"
       - "documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md"
       - "documentation/NAARI_KAVACH_VITALS_ACQUISITION.md"
       - "documentation/NAARI_KAVACH_I2C_RECOVERY.md"
@@ -178,6 +183,9 @@ jobs:
       - name: Prove v25 source-linked diagnostic evidence gate obligations
         run: python "formal-verification-and-mathematical-proofs/prove_sensor_triage.py"
 
+      - name: Prove v26 SOS-to-foreground-app alert policy
+        run: python "formal-verification-and-mathematical-proofs/prove_global_sos.py"
+
       - name: Prove complete 24-property GitHub LaTeX dossier and path integrity
         run: python "formal-verification-and-mathematical-proofs/check_proof_documentation.py"
 
@@ -292,13 +300,19 @@ jobs:
         run: npm ci
 
       - name: Lint changed app integration
-        run: npx eslint "services/BleService.ts" "app/(tabs)/safety.tsx"
+        run: npx eslint "services/BleService.ts" "app/(tabs)/safety.tsx" "hooks/useIoTEmergencyListener.ts" "components/IoTEmergencyModal.tsx" "services/EmergencyContacts.ts"
 
       - name: TypeScript check
         run: npx tsc --noEmit -p tsconfig.naari-ci.json
 
       - name: Verify BLE vitals invalidation and SOS behavior
         run: node scripts/test_naari_ble_vitals.cjs
+
+      - name: Execute global ESP32-to-app SOS and contacts regression
+        run: node scripts/test_naari_global_sos.cjs
+
+      - name: Exercise real global emergency contact chooser and user-click dialer
+        run: node scripts/test_naari_sos_modal.cjs
 
   android-native:
     name: Android native BLE build
