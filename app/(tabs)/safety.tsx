@@ -27,6 +27,7 @@ import { IoTStatusCard } from "@/components/IoTStatusCard";
 import { IoTService } from "@/services/IoTService";
 import { bleService, BleTelemetryEvent, BleDetailedState } from "@/services/BleService";
 import { ApiService } from "@/services/ApiService";
+import { normalizeEmergencyContacts, safeDialNumber } from "@/services/EmergencyContacts";
 
 export interface EmergencyContactRecord {
   id?: number;
@@ -71,8 +72,7 @@ export default function SafetyScreen() {
 
   // Connect & listen to direct ESP32 Bluetooth Low Energy events
   useEffect(() => {
-    // Start BLE scan & connect on screen mount
-    bleService.startScanAndConnect();
+    // Global tab-layout listener owns BLE scanning and direct emergency alerts.
 
     const unsubStatus = bleService.addStatusListener((st) => {
       setBleState(st);
@@ -111,12 +111,10 @@ export default function SafetyScreen() {
         }
       } else if (event.type === 'FALL_DETECTED') {
         setFallDetected(true);
-        alertTriggeredRef.current = true;
-        Alert.alert("⚠ Hardware Fall Detected!", "ESP32 wearable detected a physical fall event!");
-        void triggerSOSRef.current();
+        // ONE global alert owns emergency presentation, across all tabs.
       } else if (event.type === 'BUTTON_SOS') {
-        Alert.alert("🚨 Physical SOS Triggered!", "ESP32 hardware emergency button was pressed!");
-        void triggerSOSRef.current();
+        // Intentionally no second modal, cloud-only wait or auto dial here.
+        // (tabs)/_layout renders the global emergency contact chooser.
       }
     });
 
@@ -401,13 +399,23 @@ export default function SafetyScreen() {
       return;
     }
 
-    // Direct phone dial to all registered contacts
-    currentContacts.forEach((c) => {
-      const cleaned = (c.phone || "").replace(/\s+/g, "");
-      if (cleaned) {
-        Linking.openURL(`tel:${cleaned}`);
+    // A phone can open only one dialer at a time. Do not launch several
+    // tel: activities, and never claim calls were completed automatically.
+    const dialable = normalizeEmergencyContacts(currentContacts);
+    if (dialable.length > 0) {
+      const first = safeDialNumber(dialable[0].phone);
+      if (first) {
+        Alert.alert("Choose emergency contact",
+          "Open the phone dialer for " + dialable[0].name + "?",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Open Dialer", onPress: () => {
+              void Linking.openURL(`tel:${first}`).catch(() =>
+                Alert.alert("Dialer unavailable", "Please call your trusted contact manually."));
+            }},
+          ]);
       }
-    });
+    }
 
     // Record persistent SOS in MySQL database with real GPS coordinates
     try {
@@ -434,10 +442,10 @@ export default function SafetyScreen() {
         battery_level: 100,
       });
 
-      Alert.alert("🚨 SOS Triggered", "Emergency alert recorded in database & calling contacts!");
+      Alert.alert("🚨 SOS recorded", "SOS was saved to the server. Use the phone dialer to contact someone; calls are not automatic.");
     } catch (apiErr: any) {
       console.error("Failed to record SOS in database:", apiErr);
-      Alert.alert("🚨 SOS Local Triggered", "Emergency call placed, but server failed to log SOS event.");
+      Alert.alert("🚨 SOS not logged", "Server logging failed. You can still open the phone dialer to contact someone.");
     }
   };
   triggerSOSRef.current = triggerSOS;
@@ -581,7 +589,7 @@ export default function SafetyScreen() {
           >
             <Ionicons name="alert-circle" size={32} color="#fff" style={{ marginBottom: 2 }} />
             <Text style={styles.sosText}>TRIGGER SOS</Text>
-            <Text style={styles.sosSubText}>Calls & Sends Location</Text>
+            <Text style={styles.sosSubText}>Opens Dialer & Logs SOS</Text>
           </LinearGradient>
         </TouchableOpacity>
       </ScrollView>
@@ -592,7 +600,7 @@ export default function SafetyScreen() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Emergency Contacts</Text>
             <Text style={styles.modalSub}>
-              These contacts receive immediate calls/texts during SOS alerts.
+              Contacts shown in the SOS alert. Select one to open the dialer; calls and texts are not automatic.
             </Text>
 
             <TextInput
