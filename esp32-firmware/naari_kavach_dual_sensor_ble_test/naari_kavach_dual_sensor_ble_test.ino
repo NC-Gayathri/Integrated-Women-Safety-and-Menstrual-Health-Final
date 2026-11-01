@@ -165,9 +165,19 @@ void sendBleEvent(const String& payload) {
   if (payload == "VITALS:ACQUIRING" || payload == "VITALS:NO_VALID_READING") {
     lastReportedVitalsMask = 0;
   }
+  // A serial SOS only proves the local button handler fired. Explicit
+  // transport-stage evidence distinguishes "no phone subscribed" from a
+  // notification requested on an active GATT connection. notify() is not
+  // a phone receipt acknowledgment, even when the request succeeds.
+  const bool emergency = (payload == "SOS" || payload == "FALL_DETECTED");
   if (deviceConnected && pTxCharacteristic != nullptr) {
     pTxCharacteristic->setValue(payload.c_str());
     pTxCharacteristic->notify();
+    if (emergency) {
+      Serial.printf("[BLE_TX] %s NOTIFY_REQUESTED; APP_RECEIPT_UNCONFIRMED\n", payload.c_str());
+    }
+  } else if (emergency) {
+    Serial.printf("[BLE_TX] %s NO_CONNECTED_CLIENT; NOT_SENT\n", payload.c_str());
   }
   Serial.printf("[EVENT] %s\n", payload.c_str());
 }
@@ -1542,6 +1552,7 @@ void setup() {
   Serial.println("[CONTACT_POLICY] qualified-contact-v21-20261014");
   Serial.println("[EVIDENCE_POLICY] pulse-and-fall-diags-v22-20261014");
   Serial.println("[DIAGNOSTIC_POLICY] probe-and-led-evidence-v24-20261017");
+  Serial.println("[BLE_EVIDENCE_POLICY] notify-request-not-app-ack-v27-20261101");
   Serial.printf("BLE Name: %s\n", DEVICE_NAME);
   Serial.printf("I2C: SDA=%d SCL=%d @ %d Hz, timeout=%d ms\n",
                 I2C_SDA, I2C_SCL, I2C_CLOCK_HZ, I2C_TIMEOUT_MS);

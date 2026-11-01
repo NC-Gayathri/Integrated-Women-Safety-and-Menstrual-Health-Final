@@ -35,6 +35,7 @@ export interface EmergencyContactRecord {
   phone: string;
   relationship?: string;
   is_primary?: boolean;
+  local_only?: boolean;
 }
 
 export default function SafetyScreen() {
@@ -314,73 +315,95 @@ export default function SafetyScreen() {
 
   // --------------- Emergency Contacts: Backend MySQL + Offline Cache ---------------
   const loadContacts = async () => {
+    // Preserve local-only contacts when the backend works or fails. A
+    // successful empty server response must not resurrect stale server data.
+    let localRecords: EmergencyContactRecord[] = [];
+    try {
+      const stored = await AsyncStorage.getItem("emergencyContacts");
+      const parsed: unknown = stored ? JSON.parse(stored) : [];
+      if (Array.isArray(parsed)) {
+        localRecords = parsed.map((value: any): EmergencyContactRecord =>
+          typeof value === 'string'
+            ? { name: 'Emergency Contact', phone: value }
+            : value
+        ).filter(c => !!safeDialNumber(c?.phone));
+      }
+    } catch (e) {
+      console.warn("Emergency contacts cache unreadable.", e);
+    }
     try {
       const res = await ApiService.emergency.getContacts();
-      const backendContacts = res?.data || (Array.isArray(res) ? res : []);
-      if (Array.isArray(backendContacts) && backendContacts.length > 0) {
-        setContacts(backendContacts);
-        await AsyncStorage.setItem("emergencyContacts", JSON.stringify(backendContacts));
-        return;
-      }
+      const fromApi = res?.data || (Array.isArray(res) ? res : []);
+      if (!Array.isArray(fromApi)) throw new Error('Unexpected contacts API format');
+      const remoteContacts = fromApi.filter((c: any) => !!safeDialNumber(c?.phone));
+      const remotePhones = new Set(remoteContacts.map((c: EmergencyContactRecord) =>
+        safeDialNumber(c.phone)));
+      const localOnly = localRecords.filter(c =>
+        c.local_only === true && !remotePhones.has(safeDialNumber(c.phone)));
+      const combined = [...remoteContacts, ...localOnly];
+      contactsRef.current = combined;
+      setContacts(combined);
+      await AsyncStorage.setItem("emergencyContacts", JSON.stringify(combined));
     } catch (e) {
-      console.log("Error loading contacts from API, falling back to cache:", e);
-    }
-
-    // Fallback to cache if offline or network failure
-    try {
-      const saved = await AsyncStorage.getItem("emergencyContacts");
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const normalized: EmergencyContactRecord[] = parsed.map((item: any) =>
-          typeof item === "string" ? { name: "Emergency Contact", phone: item } : item
-        );
-        setContacts(normalized);
-      }
-    } catch (e) {
-      console.log("Error loading contacts cache", e);
+      console.log("Contacts backend unavailable; using locally cached contacts:", e);
+      contactsRef.current = localRecords;
+      setContacts(localRecords);
     }
   };
 
   const addEmergencyContact = async () => {
-    if (!newContact.trim()) {
-      Alert.alert("Phone Required", "Please enter a valid phone number.");
+    const phone = safeDialNumber(newContact);
+    if (!phone) {
+      Alert.alert("Valid number required", "Enter a phone number with 3–15 digits, optionally starting with +.");
       return;
     }
-    const phone = newContact.trim();
+    if (contactsRef.current.some(c => safeDialNumber(c.phone) === phone)) {
+      Alert.alert("Already saved", "This number is already in emergency contacts.");
+      return;
+    }
     const name = newContactName.trim() || "Emergency Contact";
-
+    let savedContact: EmergencyContactRecord;
+    let localOnly = false;
     try {
       const res = await ApiService.emergency.addContact({
-        name,
-        phone,
-        is_primary: contacts.length === 0,
+        name, phone, is_primary: contactsRef.current.length === 0,
       });
-
-      const savedContact: EmergencyContactRecord = res?.data || { name, phone };
-      const updated = [...contacts, savedContact];
-      setContacts(updated);
-      await AsyncStorage.setItem("emergencyContacts", JSON.stringify(updated));
-      setNewContact("");
-      setNewContactName("");
-      setModalVisible(false);
-      Alert.alert("Saved", "Emergency contact saved to database.");
-    } catch (err: any) {
-      console.error("Failed to add emergency contact:", err);
-      Alert.alert("Database Error", err.response?.data?.message || "Failed to save contact to database.");
+      savedContact = res?.data || { name, phone };
+    } catch (err) {
+      console.warn("Backend failed; retaining contact only on this phone:", err);
+      savedContact = { name, phone, local_only: true };
+      localOnly = true;
     }
+    const updated = [...contactsRef.current, savedContact];
+    contactsRef.current = updated;
+    setContacts(updated);
+    try {
+      await AsyncStorage.setItem("emergencyContacts", JSON.stringify(updated));
+    } catch {
+      Alert.alert("Storage error", "Phone storage failed; this contact might not persist after restarting.");
+      return;
+    }
+    setNewContact("");
+    setNewContactName("");
+    setModalVisible(false);
+    Alert.alert(localOnly ? "Saved on this phone only" : "Saved",
+      localOnly
+        ? "The backend was unavailable. This contact is available in the local SOS chooser but NOT sent to the server."
+        : "This contact is available in the local SOS chooser and was accepted by the server.");
   };
 
   const deleteContact = async (contact: EmergencyContactRecord, index: number) => {
     try {
-      if (contact.id) {
+      if (contact.id && !contact.local_only) {
         await ApiService.emergency.deleteContact(contact.id);
       }
-      const updated = contacts.filter((_, i) => i !== index);
+      const updated = contactsRef.current.filter((_, i) => i !== index);
+      contactsRef.current = updated;
       setContacts(updated);
       await AsyncStorage.setItem("emergencyContacts", JSON.stringify(updated));
     } catch (err: any) {
-      console.error("Failed to delete contact from backend:", err);
-      Alert.alert("Error", err.response?.data?.message || "Failed to delete contact from database.");
+      console.error("Failed to remove emergency contact:", err);
+      Alert.alert("Deletion failed", err.response?.data?.message || "Could not remove this contact.");
     }
   };
 
@@ -647,6 +670,7 @@ export default function SafetyScreen() {
                     <View>
                       {item.name ? <Text style={[styles.contactPhoneText, { fontWeight: "700" }]}>{item.name}</Text> : null}
                       <Text style={styles.contactPhoneText}>{item.phone}</Text>
+                      {item.local_only ? <Text style={styles.contactPhoneText}>Saved on phone only</Text> : null}
                     </View>
                   </View>
                   <TouchableOpacity onPress={() => deleteContact(item, index)}>

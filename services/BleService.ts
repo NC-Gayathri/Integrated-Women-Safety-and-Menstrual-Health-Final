@@ -113,6 +113,7 @@ class BleService {
   private diagnosticListeners: Set<BleDiagnosticListener> = new Set();
   private scanTimeoutRef: ReturnType<typeof setTimeout> | null = null;
   private reconnectTimerRef: ReturnType<typeof setTimeout> | null = null;
+  private scanStartPending = false;
 
   // EXACT ESP32 Hardware BLE Configuration
   public readonly targetDeviceName = 'NAARI_KAVACH';
@@ -202,11 +203,15 @@ class BleService {
   // ---------------------------------------------------------------------------------------
   public async startScanAndConnect(): Promise<void> {
     if (!this.manager) {
-      console.log('[BLE] Scan skipped: Native BLE is not available in Expo Go. Use BLE bridge or run an Expo Development Build.');
+      this.updateStatus('ERROR', 'Native BLE unavailable: install the new Android APK, not Expo Go.');
+      console.warn('[BLE] NO_NATIVE_MODULE: install a native Android build containing react-native-ble-plx.');
       return;
     }
 
     if (
+      this.scanStartPending ||
+      this.connectionState === 'SCANNING FOR ESP32' ||
+      this.connectionState === 'ESP32 FOUND' ||
       this.connectionState === 'CONNECTING' ||
       this.connectionState === 'ESP32 ONLINE' ||
       this.connectionState === 'RECEIVING SENSOR DATA' ||
@@ -216,7 +221,16 @@ class BleService {
       return;
     }
 
-    const hasPermission = await this.requestPermissions();
+    // React tabs, focus handlers and foreground transitions can all request
+    // scanning concurrently. Hold a synchronous lock over permission prompts
+    // so at most one native scan and its timeout are registered.
+    this.scanStartPending = true;
+    let hasPermission = false;
+    try {
+      hasPermission = await this.requestPermissions();
+    } finally {
+      this.scanStartPending = false;
+    }
     if (!hasPermission) {
       this.updateStatus('ERROR', 'Bluetooth permissions denied.');
       return;
@@ -240,6 +254,9 @@ class BleService {
         null,
         { allowDuplicates: false },
         async (error: any, device: any) => {
+          // A late callback from an already stopped scan must not disrupt a
+          // newer GATT connection or spawn another scan.
+          if (this.connectionState !== 'SCANNING FOR ESP32') return;
           if (error) {
             console.warn('[BLE] Device scan error:', error);
             this.stopScan();
@@ -267,7 +284,9 @@ class BleService {
       );
     } catch (e: any) {
       console.error('[BLE] startDeviceScan exception:', e);
+      this.stopScan();
       this.updateStatus('ERROR', e.message || 'Scan exception');
+      this.scheduleReconnect(5000);
     }
   }
 
@@ -314,6 +333,7 @@ class BleService {
 
       // Handle spontaneous disconnect
       connected.onDisconnected((error: any, dev: any) => {
+        if (this.connectedDevice !== connected) return; // Ignore stale connection callbacks.
         console.warn(`[BLE] Disconnected from ${dev?.id}:`, error?.message || 'Connection lost');
         this.cleanupConnection();
         this.isEsp32Online = false;
@@ -394,10 +414,21 @@ class BleService {
         this.charSubscription = null;
       }
 
-      // Continuous subscription - remains active indefinitely for all streaming packets
+      // A monitor can fail after initially registering. A lost notification
+      // channel is an SOS transport failure, not a healthy BLE connection.
+      let synchronouslyFailed = false;
       const subscription = characteristic.monitor((error: any, char: any) => {
         if (error) {
+          synchronouslyFailed = true;
           console.warn('[BLE] Characteristic monitor error:', error);
+          const failedConnection = this.connectedDevice;
+          if (failedConnection) {
+            this.cleanupConnection();
+            this.isEsp32Online = false;
+            this.updateStatus('ERROR', 'BLE notifications lost; reconnecting for SOS.');
+            void failedConnection.cancelConnection().catch(() => {});
+            this.scheduleReconnect(4000);
+          }
           return;
         }
 
@@ -409,7 +440,7 @@ class BleService {
           this.handleIncomingMessage(decodedText);
         }
       });
-      if (!subscription || typeof subscription.remove !== 'function') {
+      if (synchronouslyFailed || !subscription || typeof subscription.remove !== 'function') {
         throw new Error('Native BLE notification monitor did not register');
       }
       this.charSubscription = subscription;
