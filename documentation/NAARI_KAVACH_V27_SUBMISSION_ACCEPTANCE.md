@@ -49,9 +49,12 @@ or signed/attested SOS events.
    BLE/SOS) installed. Capture fresh `[BLE_EVIDENCE_POLICY]
    notify-request-not-app-ack-v27-20261101` and `[READY] BLE + SOS active`
    markers. No marker = wrong firmware.
-2. **Install the matching Android debug APK** from the successful V27
-   GitHub Actions run, artifact `naari-kavach-android-debug-apk`. Use the
-   installed app, **NOT Expo Go**. Grant Android Bluetooth/Nearby Devices
+2. **Install the matching standalone demo APK** from the successful V27
+   GitHub Actions run, artifact `naari-kavach-android-standalone-demo-debug-key`.
+   This build must contain an embedded JavaScript bundle and uses a *debug*
+   signing key: it is **not** a Play Store production release. The separate
+   `naari-kavach-android-debug-apk` often needs Metro and is not the preferred
+   offline demo build. Use the installed app, **NOT Expo Go**. Grant Android Bluetooth/Nearby Devices
    scan and connect, and any requested location permissions. Enable
    Bluetooth. Debug APKs may need the development server to run unless
    bundled; verify they actually open **offline** before demonstrating.
