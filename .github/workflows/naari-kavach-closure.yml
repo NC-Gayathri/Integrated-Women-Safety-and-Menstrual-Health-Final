@@ -34,6 +34,7 @@ on:
       - "documentation/NAARI_KAVACH_V24_SENSOR_LED_RECURRENCE.md"
       - "documentation/NAARI_KAVACH_V25_HARDWARE_TRIAGE.md"
       - "documentation/NAARI_KAVACH_V26_GLOBAL_SOS_CONTACTS.md"
+      - "documentation/NAARI_KAVACH_V27_SUBMISSION_ACCEPTANCE.md"
       - "documentation/NAARI_KAVACH_ESP32_UPLOAD_RECOVERY.md"
       - "documentation/NAARI_KAVACH_VITALS_ACQUISITION.md"
       - "documentation/NAARI_KAVACH_I2C_RECOVERY.md"
@@ -132,6 +133,9 @@ jobs:
           grep -Fq '[CONTACT_POLICY] qualified-contact-v21-20261014' "$F"
           grep -Fq '[EVIDENCE_POLICY] pulse-and-fall-diags-v22-20261014' "$F"
           grep -Fq '[DIAGNOSTIC_POLICY] probe-and-led-evidence-v24-20261017' "$F"
+          grep -Fq '[BLE_EVIDENCE_POLICY] notify-request-not-app-ack-v27-20261101' "$F"
+          grep -Fq '[BLE_TX] %s NOTIFY_REQUESTED; APP_RECEIPT_UNCONFIRMED' "$F"
+          grep -Fq '[BLE_TX] %s NO_CONNECTED_CLIENT; NOT_SENT' "$F"
 
           B="services/BleService.ts"
           grep -Fq "await connected.requestMTU(64)" "$B"
@@ -185,6 +189,9 @@ jobs:
 
       - name: Prove v26 SOS-to-foreground-app alert policy
         run: python "formal-verification-and-mathematical-proofs/prove_global_sos.py"
+
+      - name: Prove v27 BLE transmission evidence semantics and event isolation
+        run: python "formal-verification-and-mathematical-proofs/prove_ble_delivery_boundary.py"
 
       - name: Prove complete 24-property GitHub LaTeX dossier and path integrity
         run: python "formal-verification-and-mathematical-proofs/check_proof_documentation.py"
@@ -307,6 +314,9 @@ jobs:
 
       - name: Verify BLE vitals invalidation and SOS behavior
         run: node scripts/test_naari_ble_vitals.cjs
+
+      - name: Verify native Android BLE scan, subscribed SOS decode and recovery
+        run: node scripts/test_naari_ble_transport.cjs
 
       - name: Execute global ESP32-to-app SOS and contacts regression
         run: node scripts/test_naari_global_sos.cjs
